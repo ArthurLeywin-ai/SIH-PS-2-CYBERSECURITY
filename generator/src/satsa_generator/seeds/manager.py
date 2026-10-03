@@ -15,15 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import TYPE_CHECKING
 
-import numpy as np
-from numpy.random import Generator, PCG64DXSM, SeedSequence
+from numpy.random import PCG64DXSM, Generator, SeedSequence
 
 from satsa_generator.core.errors import SeedError
-
-if TYPE_CHECKING:
-    pass
 
 
 class SeedManager:
@@ -43,7 +38,7 @@ class SeedManager:
         _public_alias: Opaque public alias for the master seed.
     """
 
-    def __init__(self, master_seed: bytes) -> None:
+    def __init__(self, master_seed: bytes, *, public_alias: str | None = None) -> None:
         """Initialize the seed manager.
 
         Args:
@@ -64,23 +59,19 @@ class SeedManager:
             )
         self._master_seed = master_seed
         self._registry: dict[str, tuple[str, Generator]] = {}
-        # Public alias: independently generated opaque identifier, NOT a hash
-        # of the seed itself (to prevent seed recovery from alias)
-        self._public_alias = self._derive_public_alias()
+        # An alias, when supplied, is independently assigned by seed custody.
+        # It is deliberately not derived from seed bytes.
+        self._public_alias = public_alias
 
     @property
-    def public_alias(self) -> str:
-        """Non-reversible public alias for the master seed.
-
-        This alias appears in public manifests. It is derived from
-        a distinct HMAC label to prevent direct seed recovery.
-        """
+    def public_alias(self) -> str | None:
+        """Return the independently assigned custody alias, when available."""
         return self._public_alias
 
     @property
     def registered_labels(self) -> list[str]:
         """List of all registered stream labels (for audit/diagnostics)."""
-        return list(self._registry.keys())
+        return sorted(self._registry.keys())
 
     def get_rng(self, label: str) -> Generator:
         """Get or create a named deterministic RNG for the given label.
@@ -165,6 +156,23 @@ class SeedManager:
             )
         return self._registry[label][0]
 
+    def public_ledger(self) -> dict[str, str]:
+        """Return a sorted label-to-fingerprint diagnostic ledger."""
+        return {
+            label: self._registry[label][0]
+            for label in sorted(self._registry)
+        }
+
+    def private_ledger_hash(self) -> str:
+        """Hash registered labels and full child entropy without exposing it."""
+        digest = hashlib.sha256()
+        for label in sorted(self._registry):
+            encoded_label = label.encode("utf-8")
+            digest.update(len(encoded_label).to_bytes(4, "big"))
+            digest.update(encoded_label)
+            digest.update(self._derive_child_entropy(label))
+        return digest.hexdigest()
+
     def verify_known_answer(self, label: str, expected_first_int: int) -> bool:
         """Known-answer test: verify that a stream produces the expected first value.
 
@@ -198,21 +206,9 @@ class SeedManager:
             hashlib.sha256,
         ).digest()
 
-    def _derive_public_alias(self) -> str:
-        """Derive a public alias using a distinct HMAC label.
-
-        The alias is an opaque hex string that cannot be reversed to the seed.
-        It uses a fixed derivation label that is never used for data generation.
-        """
-        alias_bytes = hmac.new(
-            self._master_seed,
-            b"__public_seed_alias__/v1",
-            hashlib.sha256,
-        ).digest()
-        return alias_bytes.hex()
-
     def __repr__(self) -> str:
+        alias = f"{self._public_alias[:16]}..." if self._public_alias else "unassigned"
         return (
-            f"SeedManager(alias={self._public_alias[:16]}..., "
+            f"SeedManager(alias={alias}, "
             f"streams={len(self._registry)})"
         )

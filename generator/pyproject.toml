@@ -38,6 +38,7 @@ select = ["E", "F", "I", "W", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
     "offline: tests that verify no network dependency",
     "determinism: tests that verify reproducible output",

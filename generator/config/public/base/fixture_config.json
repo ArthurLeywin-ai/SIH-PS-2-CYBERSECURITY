@@ -6,6 +6,7 @@
     "mapping_set_version": "0.1.0",
     "vocabulary_set_version": "0.1.0",
     "scenario_catalog_version": "0.1.0",
+    "seed_derivation_version": "hmac-sha256-pcg64dxsm-v1",
     "tier": "deterministic_fixture",
     "split": "development",
     "output_root": "./output",

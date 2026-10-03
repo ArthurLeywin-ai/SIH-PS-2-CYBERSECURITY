@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import enum
 
-
 # ---------------------------------------------------------------------------
 # Dataset and package enums
 # ---------------------------------------------------------------------------
 
-class PackageDomain(str, enum.Enum):
+class PackageDomain(enum.StrEnum):
     """Physical separation domains for generated packages."""
 
     OPERATIONAL = "operational_evidence"
@@ -24,7 +23,7 @@ class PackageDomain(str, enum.Enum):
     BINDING = "binding_private"
 
 
-class BenchmarkTier(str, enum.Enum):
+class BenchmarkTier(enum.StrEnum):
     """Benchmark volume tiers from DATASET_GENERATION_SPEC §18."""
 
     DETERMINISTIC_FIXTURE = "deterministic_fixture"
@@ -34,7 +33,7 @@ class BenchmarkTier(str, enum.Enum):
     HELD_OUT = "held_out"
 
 
-class SplitID(str, enum.Enum):
+class SplitID(enum.StrEnum):
     """Dataset split identifiers."""
 
     DEVELOPMENT = "development"
@@ -46,7 +45,7 @@ class SplitID(str, enum.Enum):
 # Period and maturity
 # ---------------------------------------------------------------------------
 
-class PeriodMaturity(str, enum.Enum):
+class PeriodMaturity(enum.StrEnum):
     """Period maturity states from DATASET_GENERATION_SPEC §6.2."""
 
     MATURE = "MATURE"
@@ -55,7 +54,7 @@ class PeriodMaturity(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class FamilyPresence(str, enum.Enum):
+class FamilyPresence(enum.StrEnum):
     """Evidence family presence states from DATA_SCHEMA.md §21.3."""
 
     PROVIDED = "PROVIDED"
@@ -68,7 +67,7 @@ class FamilyPresence(str, enum.Enum):
 # Evidence families
 # ---------------------------------------------------------------------------
 
-class EvidenceFamily(str, enum.Enum):
+class EvidenceFamily(enum.StrEnum):
     """Operational evidence families from DATA_SCHEMA.md."""
 
     ORGANIZATION = "organization"
@@ -95,7 +94,7 @@ class EvidenceFamily(str, enum.Enum):
 # Severity and controlled vocabularies
 # ---------------------------------------------------------------------------
 
-class Severity(str, enum.Enum):
+class Severity(enum.StrEnum):
     """Canonical severity vocabulary from DATA_SCHEMA.md §18.1."""
 
     INFORMATIONAL = "INFORMATIONAL"
@@ -106,7 +105,7 @@ class Severity(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class AlertStatus(str, enum.Enum):
+class AlertStatus(enum.StrEnum):
     """Canonical alert status vocabulary."""
 
     NEW = "NEW"
@@ -120,7 +119,7 @@ class AlertStatus(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class CaseStatus(str, enum.Enum):
+class CaseStatus(enum.StrEnum):
     """Canonical case status vocabulary."""
 
     NEW = "NEW"
@@ -136,7 +135,7 @@ class CaseStatus(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class Disposition(str, enum.Enum):
+class Disposition(enum.StrEnum):
     """Canonical disposition vocabulary."""
 
     TRUE_POSITIVE = "TRUE_POSITIVE"
@@ -151,7 +150,7 @@ class Disposition(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class AssetCriticality(str, enum.Enum):
+class AssetCriticality(enum.StrEnum):
     """Canonical asset criticality vocabulary."""
 
     LOW = "LOW"
@@ -161,7 +160,7 @@ class AssetCriticality(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class MonitoringStatus(str, enum.Enum):
+class MonitoringStatus(enum.StrEnum):
     """Canonical monitoring status vocabulary."""
 
     COVERED = "COVERED"
@@ -173,7 +172,7 @@ class MonitoringStatus(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class FindingCategory(str, enum.Enum):
+class FindingCategory(enum.StrEnum):
     """Finding category vocabulary (for ground-truth references only)."""
 
     EXECUTION_GAP = "EXECUTION_GAP"
@@ -186,7 +185,7 @@ class FindingCategory(str, enum.Enum):
     DATA_QUALITY = "DATA_QUALITY"
 
 
-class TrueCategory(str, enum.Enum):
+class TrueCategory(enum.StrEnum):
     """Private ground-truth classification (never in operational output)."""
 
     ATTENTION = "ATTENTION"
@@ -196,7 +195,7 @@ class TrueCategory(str, enum.Enum):
     AMBIGUOUS = "AMBIGUOUS"
 
 
-class ValueState(str, enum.Enum):
+class ValueState(enum.StrEnum):
     """Seven canonical value states from DATA_SCHEMA.md §12.1."""
 
     OBSERVED_VALUE = "OBSERVED_VALUE"
@@ -212,7 +211,7 @@ class ValueState(str, enum.Enum):
 # Source profile identifiers
 # ---------------------------------------------------------------------------
 
-class SourceProfile(str, enum.Enum):
+class SourceProfile(enum.StrEnum):
     """Source layout profile identifiers from DATASET_GENERATION_SPEC §14."""
 
     SRC_A = "SRC-A"

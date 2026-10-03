@@ -42,7 +42,7 @@ class IDService:
         """
         try:
             self._namespace = uuid.UUID(dataset_namespace)
-        except ValueError as e:
+        except (ValueError, AttributeError, TypeError) as e:
             raise ValueError(
                 f"dataset_namespace must be a valid UUID string, got: {dataset_namespace}"
             ) from e
@@ -77,6 +77,8 @@ class IDService:
         if not key_parts:
             raise ValueError("At least one key part is required for ID generation.")
         for i, part in enumerate(key_parts):
+            if not isinstance(part, str):
+                raise TypeError(f"Key part at index {i} must be a string.")
             if not part or not part.strip():
                 raise ValueError(f"Key part at index {i} must not be empty.")
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -81,6 +82,28 @@ def create_parser() -> argparse.ArgumentParser:
         help="Hex-encoded 256-bit master seed (or set SATSA_MASTER_SEED env var).",
     )
 
+    fixture_parser = subparsers.add_parser(
+        "build-fixture",
+        help="Build the tiny deterministic Milestone 1 operational fixture.",
+    )
+    fixture_parser.add_argument(
+        "config_path",
+        type=Path,
+        help="Path to the deterministic fixture configuration.",
+    )
+    fixture_parser.add_argument(
+        "--seed",
+        type=str,
+        default=None,
+        help="Hex-encoded 256-bit master seed (or SATSA_MASTER_SEED).",
+    )
+    fixture_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Runtime output directory override (must be absent or empty).",
+    )
+
     return parser
 
 
@@ -91,7 +114,7 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
     try:
         config = load_config(args.config_path)
         config_hash = config.config_hash()
-        print(f"✓ Configuration valid.")
+        print("✓ Configuration valid.")
         print(f"  Hash: {config_hash}")
         print(f"  Organizations: {len(config.organizations)}")
         print(f"  Periods: {len(config.periods)}")
@@ -134,6 +157,34 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_fixture(args: argparse.Namespace) -> int:
+    """Build the operational-only deterministic Milestone 1 fixture."""
+    from satsa_generator.fixture.builder import build_fixture, parse_master_seed_hex
+
+    seed_hex = args.seed or os.environ.get("SATSA_MASTER_SEED")
+    if seed_hex is None:
+        print(
+            "✗ Fixture build failed: provide --seed or SATSA_MASTER_SEED.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        result = build_fixture(
+            args.config_path,
+            parse_master_seed_hex(seed_hex),
+            output_root=args.output,
+        )
+        print("✓ Milestone 1 fixture built.")
+        print(f"  Operational root: {result.operational_root}")
+        print(f"  Tree SHA-256: {result.tree_sha256}")
+        print(f"  Records: {result.record_counts}")
+        print("  Ground truth: not generated")
+        return 0
+    except Exception as exc:
+        print(f"✗ Fixture build failed: {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     """Main entry point for the generator CLI."""
     # Configure logging
@@ -154,6 +205,7 @@ def main() -> int:
         "validate-config": cmd_validate_config,
         "freeze-config": cmd_freeze_config,
         "generate": cmd_generate,
+        "build-fixture": cmd_build_fixture,
     }
 
     handler = commands.get(args.command)

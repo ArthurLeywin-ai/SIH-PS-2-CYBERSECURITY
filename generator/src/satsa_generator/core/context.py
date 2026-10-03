@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from satsa_generator.core.types import BenchmarkTier, PackageDomain, SplitID
@@ -39,6 +41,7 @@ class VersionTuple:
     scenario_catalog_version: str
     dataset_tier: BenchmarkTier
     split_id: SplitID
+    seed_ledger_sha256: str
 
     def canonical_json(self) -> str:
         """Deterministic JSON serialization for hashing."""
@@ -52,6 +55,7 @@ class VersionTuple:
             "scenario_catalog_version": self.scenario_catalog_version,
             "dataset_tier": self.dataset_tier.value,
             "split_id": self.split_id.value,
+            "seed_ledger_sha256": self.seed_ledger_sha256,
         }
         return json.dumps(data, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
 
@@ -91,12 +95,13 @@ class BuildContext:
     binding_root: Path
     dataset_namespace: str
     created_at_utc: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate physical path separation between package domains."""
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         roots = {
             PackageDomain.OPERATIONAL: self.operational_root,
             PackageDomain.GROUND_TRUTH: self.truth_root,

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from satsa_generator.core.types import BenchmarkTier, SourceProfile, SplitID
 
@@ -35,7 +37,13 @@ FORBIDDEN_CONFIG_KEYS: frozenset[str] = frozenset({
 })
 
 
-class PeriodConfig(BaseModel):
+class StrictFrozenModel(BaseModel):
+    """Base for immutable, typo-intolerant generator configuration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class PeriodConfig(StrictFrozenModel):
     """Configuration for a single reporting period."""
 
     period_id: str = Field(
@@ -56,8 +64,17 @@ class PeriodConfig(BaseModel):
         description="Human-readable period description",
     )
 
+    @model_validator(mode="after")
+    def validate_interval(self) -> PeriodConfig:
+        """Require timezone-aware UTC timestamps and a positive interval."""
+        start = _parse_utc(self.start_utc, "start_utc")
+        end = _parse_utc(self.end_utc, "end_utc")
+        if end <= start:
+            raise ValueError("end_utc must be later than start_utc")
+        return self
 
-class OrganizationConfig(BaseModel):
+
+class OrganizationConfig(StrictFrozenModel):
     """Configuration for a synthetic organization's public profile."""
 
     org_id: str = Field(
@@ -93,7 +110,7 @@ class OrganizationConfig(BaseModel):
     )
 
 
-class GeneratorConfig(BaseModel):
+class GeneratorConfig(StrictFrozenModel):
     """Top-level generator configuration.
 
     This is the root configuration model that aggregates all sub-configurations.
@@ -130,6 +147,11 @@ class GeneratorConfig(BaseModel):
         default="0.1.0",
         description="Scenario catalog version",
     )
+    seed_derivation_version: str = Field(
+        default="hmac-sha256-pcg64dxsm-v1",
+        pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$",
+        description="Versioned named-stream derivation algorithm",
+    )
 
     # Build parameters
     tier: BenchmarkTier = Field(
@@ -148,14 +170,16 @@ class GeneratorConfig(BaseModel):
     )
 
     # Population
-    organizations: list[OrganizationConfig] = Field(
-        default_factory=list,
+    organizations: tuple[OrganizationConfig, ...] = Field(
+        ...,
+        min_length=1,
         description="Synthetic organization configurations",
     )
 
     # Periods
-    periods: list[PeriodConfig] = Field(
-        default_factory=list,
+    periods: tuple[PeriodConfig, ...] = Field(
+        ...,
+        min_length=1,
         description="Reporting period configurations",
     )
 
@@ -171,9 +195,36 @@ class GeneratorConfig(BaseModel):
         description="Maximum text field length in characters",
     )
 
+    @field_validator("dataset_namespace")
+    @classmethod
+    def validate_dataset_namespace(cls, value: str) -> str:
+        """Require a canonical UUID namespace."""
+        try:
+            return str(uuid.UUID(value))
+        except (ValueError, AttributeError) as exc:
+            raise ValueError("dataset_namespace must be a valid UUID") from exc
+
+    @field_validator("output_root")
+    @classmethod
+    def validate_portable_output_root(cls, value: str) -> str:
+        """Keep committed configuration free of machine-specific paths."""
+        path = Path(value)
+        if not value.strip():
+            raise ValueError("output_root must not be empty")
+        if path.is_absolute():
+            raise ValueError(
+                "output_root in versioned configuration must be relative; "
+                "use the CLI output override for an absolute runtime path"
+            )
+        if ".." in path.parts:
+            raise ValueError("output_root must not traverse outside the build workspace")
+        return value
+
     @field_validator("organizations")
     @classmethod
-    def validate_unique_org_ids(cls, v: list[OrganizationConfig]) -> list[OrganizationConfig]:
+    def validate_unique_org_ids(
+        cls, v: tuple[OrganizationConfig, ...]
+    ) -> tuple[OrganizationConfig, ...]:
         """Ensure organization IDs are unique."""
         ids = [org.org_id for org in v]
         if len(ids) != len(set(ids)):
@@ -183,7 +234,9 @@ class GeneratorConfig(BaseModel):
 
     @field_validator("periods")
     @classmethod
-    def validate_unique_period_ids(cls, v: list[PeriodConfig]) -> list[PeriodConfig]:
+    def validate_unique_period_ids(
+        cls, v: tuple[PeriodConfig, ...]
+    ) -> tuple[PeriodConfig, ...]:
         """Ensure period IDs are unique."""
         ids = [p.period_id for p in v]
         if len(ids) != len(set(ids)):
@@ -243,6 +296,19 @@ def _scan_for_forbidden_keys(data: dict[str, Any], path: str) -> None:
                     _scan_for_forbidden_keys(item, f"{full_path}[{i}]")
 
 
+def _parse_utc(value: str, field_name: str) -> datetime:
+    """Parse an ISO-8601 timestamp and require an explicit UTC offset."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a valid ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field_name} must include an explicit UTC offset")
+    if parsed.utcoffset().total_seconds() != 0:
+        raise ValueError(f"{field_name} must be normalized to UTC")
+    return parsed
+
+
 def load_config(config_path: Path) -> GeneratorConfig:
     """Load and validate generator configuration from a JSON or TOML file.
 
@@ -262,13 +328,16 @@ def load_config(config_path: Path) -> GeneratorConfig:
             f"Configuration file not found: {config_path}",
             context={"path": str(config_path)},
         )
+    if not config_path.is_file():
+        raise ConfigurationError(
+            f"Configuration path is not a file: {config_path}",
+            context={"path": str(config_path)},
+        )
 
     suffix = config_path.suffix.lower()
     try:
         if suffix == ".json":
-            import json as json_mod
-
-            raw = json_mod.loads(config_path.read_text(encoding="utf-8"))
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
         elif suffix == ".toml":
             import tomllib
 
@@ -278,11 +347,19 @@ def load_config(config_path: Path) -> GeneratorConfig:
                 f"Unsupported configuration format: {suffix}. Use .json or .toml.",
                 context={"path": str(config_path), "suffix": suffix},
             )
-    except (json.JSONDecodeError, Exception) as e:
+    except ConfigurationError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
         raise ConfigurationError(
             f"Failed to parse configuration file: {config_path}: {e}",
             context={"path": str(config_path)},
         ) from e
+
+    if not isinstance(raw, dict):
+        raise ConfigurationError(
+            "Configuration root must be an object/table.",
+            context={"path": str(config_path), "received_type": type(raw).__name__},
+        )
 
     try:
         return GeneratorConfig.model_validate(raw)

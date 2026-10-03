@@ -76,6 +76,10 @@ class PackagingError(GeneratorError):
     """
 
 
+class FixtureBuildError(GeneratorError):
+    """Raised when the deterministic Milestone 1 fixture cannot be built."""
+
+
 @dataclass(frozen=True)
 class ValidationIssue:
     """Structured validation finding for gate reports.
