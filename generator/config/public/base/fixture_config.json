@@ -1,0 +1,57 @@
+{
+    "dataset_namespace": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "generator_version": "0.1.0",
+    "schema_version": "0.1.0",
+    "source_profile_set_version": "0.1.0",
+    "mapping_set_version": "0.1.0",
+    "vocabulary_set_version": "0.1.0",
+    "scenario_catalog_version": "0.1.0",
+    "tier": "deterministic_fixture",
+    "split": "development",
+    "output_root": "./output",
+    "max_alerts_per_org_period": 2000,
+    "max_text_length": 4096,
+    "organizations": [
+        {
+            "org_id": "CSE-001",
+            "name": "Apex Sentinel Operations",
+            "cohort": "COHORT-A",
+            "sector": "SECTOR-ALPHA",
+            "source_profile": "SRC-A",
+            "scale_band": "large",
+            "operating_model": "centralized_24x7"
+        },
+        {
+            "org_id": "CSE-006",
+            "name": "Meridian Shield Services",
+            "cohort": "COHORT-B",
+            "sector": "SECTOR-BETA",
+            "source_profile": "SRC-B",
+            "scale_band": "medium",
+            "operating_model": "hybrid"
+        },
+        {
+            "org_id": "CSE-011",
+            "name": "Frontier Watch Group",
+            "cohort": "COHORT-C",
+            "sector": "SECTOR-GAMMA",
+            "source_profile": "SRC-C",
+            "scale_band": "small",
+            "operating_model": "distributed"
+        }
+    ],
+    "periods": [
+        {
+            "period_id": "P01",
+            "start_utc": "2025-01-01T00:00:00Z",
+            "end_utc": "2025-04-01T00:00:00Z",
+            "description": "Historical baseline period 1"
+        },
+        {
+            "period_id": "P02",
+            "start_utc": "2025-04-01T00:00:00Z",
+            "end_utc": "2025-07-01T00:00:00Z",
+            "description": "Historical baseline period 2"
+        }
+    ]
+}
