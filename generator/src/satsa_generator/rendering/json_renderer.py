@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from uuid import UUID
 
-from satsa_generator.canonical.oracle import OracleMappingRecord
 from satsa_generator.fixture.models import FixtureRecord
+from satsa_generator.provenance.models import FieldProvenance, SourceRecordIndex
 from satsa_generator.rendering.interfaces import BaseRenderer, RenderContext
 
 
@@ -19,6 +21,8 @@ class JSONRenderer(BaseRenderer):
         context: RenderContext,
     ) -> bytes:
         if not records:
+            if context.profile.format == "JSONL":
+                return b""
             return b"[]"
 
         rendered_list = []
@@ -27,46 +31,73 @@ class JSONRenderer(BaseRenderer):
             record_dict = record.model_dump(mode="json")
             source_obj = {}
 
-            # Determine primary ID
             canonical_id = None
+            org_id = None
+            sub_id = None
+
             for key, val in record_dict.items():
                 if key.endswith("_id") and isinstance(val, str) and "-" in val:
-                    try:
-                        import uuid
+                    if canonical_id is None:
+                        canonical_id = UUID(val)
+                if key == "organization_id":
+                    org_id = UUID(val) if val else None
+                if key == "submission_id":
+                    sub_id = UUID(val) if val else None
 
-                        canonical_id = uuid.UUID(val)
-                        break
-                    except Exception:
-                        pass
+            if not canonical_id:
+                canonical_id = UUID(int=idx)
 
             for canonical_field, canonical_value in record_dict.items():
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)
                 if mapped:
-                    source_name, source_value = mapped
-                    source_obj[source_name] = source_value
+                    source_name, source_value, path = mapped
 
-                    if canonical_id:
-                        context.oracle.register_mapping(
-                            OracleMappingRecord(
-                                source_profile=context.profile.profile_id,
-                                source_file_path=context.output_path,
-                                source_record_index=idx,
-                                source_field_name=source_name,
-                                canonical_family=family,
-                                canonical_record_id=canonical_id,
-                                canonical_field_name=canonical_field,
-                                canonical_value=canonical_value,
-                                rendered_value=source_value,
-                            )
+                    if path:
+                        # Handle nested dictionaries
+                        current = source_obj
+                        for p in path[:-1]:
+                            if p not in current:
+                                current[p] = {}
+                            current = current[p]
+                        current[path[-1]] = source_value
+                        locator_suffix = "." + ".".join(path)
+                    else:
+                        source_obj[source_name] = source_value
+                        locator_suffix = f".{source_name}"
+
+                    context.field_provenance.append(
+                        FieldProvenance(
+                            source_file_path=context.output_path,
+                            source_record_locator=f"[{idx}]{locator_suffix}",
+                            source_field_name=path[-1] if path else source_name,
+                            canonical_record_id=canonical_id,
+                            canonical_field_name=canonical_field,
                         )
+                    )
 
             rendered_list.append(source_obj)
 
+            row_bytes = json.dumps(source_obj, sort_keys=True).encode("utf-8")
+            checksum = hashlib.sha256(row_bytes).hexdigest()
+
+            context.indexes.append(
+                SourceRecordIndex(
+                    source_file_path=context.output_path,
+                    source_profile_id=context.profile.profile_id,
+                    organization_id=org_id,
+                    submission_id=sub_id,
+                    evidence_family=family,
+                    canonical_record_id=canonical_id,
+                    source_record_locator=f"[{idx}]",
+                    source_checksum=checksum,
+                )
+            )
+
         if context.profile.format == "JSON":
-            # Pretty print for standard JSON
             content = json.dumps(rendered_list, indent=2, sort_keys=True)
             return content.encode("utf-8")
+        elif context.profile.format == "JSONL":
+            content = "\n".join(json.dumps(obj, sort_keys=True) for obj in rendered_list)
+            return content.encode("utf-8")
 
-        # If needed for JSON Lines
-        content = "\n".join(json.dumps(obj, sort_keys=True) for obj in rendered_list)
-        return content.encode("utf-8")
+        return b""

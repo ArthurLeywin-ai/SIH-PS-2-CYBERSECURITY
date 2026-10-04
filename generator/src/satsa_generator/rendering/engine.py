@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
-from satsa_generator.canonical.oracle import CanonicalOracle
+from satsa_generator.canonical.oracle import CanonicalOracle, CanonicalRecordState
 from satsa_generator.fixture.models import FixtureRecord
 from satsa_generator.profiles.models import ProfileDefinition
+from satsa_generator.provenance.models import (
+    FieldProvenance,
+    RelationshipProvenance,
+    SourceRecordIndex,
+)
 from satsa_generator.rendering.csv_renderer import CSVRenderer
 from satsa_generator.rendering.interfaces import RenderContext
 from satsa_generator.rendering.json_renderer import JSONRenderer
@@ -18,9 +25,10 @@ from satsa_generator.rendering.json_renderer import JSONRenderer
 @dataclass
 class RenderResult:
     """Result of rendering a batch of records."""
-
     files_written: list[dict[str, Any]]
-    oracle_hash: str
+    indexes: list[SourceRecordIndex]
+    field_provenance: list[FieldProvenance]
+    relationship_provenance: list[RelationshipProvenance]
 
 
 class RenderingEngine:
@@ -30,13 +38,19 @@ class RenderingEngine:
         self.output_root = output_root
         self.profile = profile
         self.oracle = CanonicalOracle()
+        self.indexes: list[SourceRecordIndex] = []
+        self.field_provenance: list[FieldProvenance] = []
+        self.relationship_provenance: list[RelationshipProvenance] = []
 
-        if profile.format == "CSV":
+        if self.profile.format == "CSV":
             self.renderer = CSVRenderer()
             self.ext = "csv"
-        elif profile.format == "JSON":
+        elif self.profile.format == "JSON":
             self.renderer = JSONRenderer()
             self.ext = "json"
+        elif self.profile.format == "JSONL":
+            self.renderer = JSONRenderer()
+            self.ext = "jsonl"
         else:
             raise ValueError(f"Unsupported format: {profile.format}")
 
@@ -45,23 +59,43 @@ class RenderingEngine:
         if not records:
             return None
 
-        # Build logical filename
         filename = f"{family}_{self.profile.profile_id.lower()}.{self.ext}"
         filepath = self.output_root / filename
         relative_path = filepath.name
 
         context = RenderContext(
-            oracle=self.oracle,
             profile=self.profile,
             output_path=relative_path,
         )
 
         content = self.renderer.render_records(family, records, context)
 
+        self.indexes.extend(context.indexes)
+        self.field_provenance.extend(context.field_provenance)
+        self.relationship_provenance.extend(context.relationship_provenance)
+
+        # Register Expected Canonical State
+        for idx, record in enumerate(records):
+            record_dict = record.model_dump(mode="json")
+            canonical_id = None
+            for key, val in record_dict.items():
+                if key.endswith("_id") and isinstance(val, str) and "-" in val:
+                    if canonical_id is None:
+                        canonical_id = UUID(val)
+            if not canonical_id:
+                canonical_id = UUID(int=idx)
+
+            self.oracle.register_expected_record(
+                CanonicalRecordState(
+                    canonical_record_id=canonical_id,
+                    canonical_family=family,
+                    fields=record_dict,
+                    relationships={}  # Expand if explicit relationships are mapped
+                )
+            )
+
         filepath.parent.mkdir(parents=True, exist_ok=True)
         filepath.write_bytes(content)
-
-        import hashlib
 
         return {
             "path": relative_path,
@@ -69,15 +103,34 @@ class RenderingEngine:
             "sha256": hashlib.sha256(content).hexdigest(),
         }
 
-    def write_oracle(self, oracle_path: Path) -> str:
-        """Write the canonical oracle to disk and return its hash."""
-        # Convert entire oracle to dict for JSON serialization
-        oracle_data = {
-            "mappings": [m.model_dump(mode="json") for m in self.oracle.mappings],
-            "provenance": [p.model_dump(mode="json") for p in self.oracle.provenance],
+    def get_provenance_hash(self) -> str:
+        """Deterministically hash the provenance and oracle."""
+        combined = {
+            "oracle": self.oracle.calculate_oracle_hash(),
+            "indexes": sorted([idx.model_dump(mode="json") for idx in self.indexes], key=lambda x: x["source_record_locator"]),
+            "field_provenance": sorted([fp.model_dump(mode="json") for fp in self.field_provenance], key=lambda x: (x["source_record_locator"], x["canonical_field_name"])),
+            "relationship_provenance": sorted([rp.model_dump(mode="json") for rp in self.relationship_provenance], key=lambda x: x["source_record_locator"]),
         }
+        content = json.dumps(combined, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return hashlib.sha256(content).hexdigest()
 
-        oracle_path.parent.mkdir(parents=True, exist_ok=True)
-        oracle_path.write_text(json.dumps(oracle_data, indent=2), encoding="utf-8")
+    def write_metadata(self, base_path: Path, prefix: str) -> str:
+        """Write oracle, index, and provenance metadata."""
+        base_path.mkdir(parents=True, exist_ok=True)
 
-        return self.oracle.calculate_oracle_hash()
+        oracle_path = base_path / f"{prefix}_oracle.json"
+        oracle_data = [r.model_dump(mode="json") for r in self.oracle.expected_records.values()]
+        oracle_path.write_text(json.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8")
+
+        index_path = base_path / f"{prefix}_index.json"
+        index_data = [idx.model_dump(mode="json") for idx in self.indexes]
+        index_path.write_text(json.dumps(index_data, indent=2, sort_keys=True), encoding="utf-8")
+
+        prov_path = base_path / f"{prefix}_provenance.json"
+        prov_data = {
+            "field_provenance": [fp.model_dump(mode="json") for fp in self.field_provenance],
+            "relationship_provenance": [rp.model_dump(mode="json") for rp in self.relationship_provenance]
+        }
+        prov_path.write_text(json.dumps(prov_data, indent=2, sort_keys=True), encoding="utf-8")
+
+        return self.get_provenance_hash()

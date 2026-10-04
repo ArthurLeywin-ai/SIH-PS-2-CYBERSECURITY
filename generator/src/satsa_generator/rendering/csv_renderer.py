@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
+from uuid import UUID
 
-from satsa_generator.canonical.oracle import OracleMappingRecord
 from satsa_generator.fixture.models import FixtureRecord
+from satsa_generator.provenance.models import FieldProvenance, SourceRecordIndex
 from satsa_generator.rendering.interfaces import BaseRenderer, RenderContext
 
 
@@ -29,48 +32,61 @@ class CSVRenderer(BaseRenderer):
             record_dict = record.model_dump(mode="json")
             source_row = {}
 
-            # Map fields and record in oracle
+            canonical_id = None
+            org_id = None
+            sub_id = None
+
+            for key, val in record_dict.items():
+                if key.endswith("_id") and isinstance(val, str) and "-" in val:
+                    if canonical_id is None:
+                        canonical_id = UUID(val)
+                if key == "organization_id":
+                    org_id = UUID(val) if val else None
+                if key == "submission_id":
+                    sub_id = UUID(val) if val else None
+
+            if not canonical_id:
+                # Fallback if no specific ID is found (shouldn't happen in M2 models)
+                canonical_id = UUID(int=idx)
+
             for canonical_field, canonical_value in record_dict.items():
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)
                 if mapped:
-                    source_name, source_value = mapped
+                    source_name, source_value, _ = mapped
                     source_row[source_name] = source_value
 
-                    # Register in oracle
-                    # Extract the primary ID if present for lineage (assumes ID ends with _id)
-                    canonical_id = None
-                    for key, val in record_dict.items():
-                        if key.endswith("_id") and isinstance(val, str) and "-" in val:
-                            try:
-                                import uuid
-
-                                canonical_id = uuid.UUID(val)
-                                break
-                            except Exception:
-                                pass
-
-                    if canonical_id:
-                        context.oracle.register_mapping(
-                            OracleMappingRecord(
-                                source_profile=context.profile.profile_id,
-                                source_file_path=context.output_path,
-                                source_record_index=idx,
-                                source_field_name=source_name,
-                                canonical_family=family,
-                                canonical_record_id=canonical_id,
-                                canonical_field_name=canonical_field,
-                                canonical_value=canonical_value,
-                                rendered_value=source_value,
-                            )
+                    context.field_provenance.append(
+                        FieldProvenance(
+                            source_file_path=context.output_path,
+                            source_record_locator=f"row:{idx+1}",
+                            source_field_name=source_name,
+                            canonical_record_id=canonical_id,
+                            canonical_field_name=canonical_field,
                         )
+                    )
 
             if writer is None:
-                # Initialize CSV headers based on the first mapped row
                 writer = csv.DictWriter(
                     output, fieldnames=list(source_row.keys()), lineterminator="\n"
                 )
                 writer.writeheader()
 
             writer.writerow(source_row)
+
+            row_bytes = json.dumps(source_row, sort_keys=True).encode("utf-8")
+            checksum = hashlib.sha256(row_bytes).hexdigest()
+
+            context.indexes.append(
+                SourceRecordIndex(
+                    source_file_path=context.output_path,
+                    source_profile_id=context.profile.profile_id,
+                    organization_id=org_id,
+                    submission_id=sub_id,
+                    evidence_family=family,
+                    canonical_record_id=canonical_id,
+                    source_record_locator=f"row:{idx+1}",
+                    source_checksum=checksum,
+                )
+            )
 
         return output.getvalue().encode("utf-8")

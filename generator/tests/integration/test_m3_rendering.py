@@ -1,146 +1,71 @@
 """Integration tests for Milestone 3 (Source Profiles and Canonical Oracle)."""
 
-import json
-from datetime import UTC
 from pathlib import Path
 
-from satsa_generator.canonical.oracle import CanonicalOracle, OracleMappingRecord
+import pytest
+
 from satsa_generator.fixture.builder import build_m3_fixture
-from satsa_generator.fixture.models import OrganizationRecord
 from satsa_generator.profiles.catalog import get_profile
-from satsa_generator.rendering.engine import RenderingEngine
+from satsa_generator.validation.parser import parse_and_validate
 
 
-def test_m3_build_fixture(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
+def test_m3_build_fixture_and_parseback(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
     """Verify that M3 build succeeds, generates source files and an oracle."""
     result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
 
-    # Check outputs exist
     assert result.operational_root.exists()
     assert (result.operational_root / "fixture_manifest.json").exists()
 
-    # Check that CSV/JSON rendered files exist instead of canonical json
-    rendered_files = list(result.operational_root.glob("*.*"))
-    assert len(rendered_files) > 0
-
-    # Verify the Oracle was built
     oracle_dir = tmp_path / "canonical_reference"
     assert oracle_dir.exists()
 
-    oracle_a = oracle_dir / "oracle_a.json"
-    assert oracle_a.exists()
-
-    with oracle_a.open() as f:
-        data = json.load(f)
-        assert "mappings" in data
-        assert len(data["mappings"]) > 0
-
-
-def test_rendering_engine_csv(tmp_path: Path) -> None:
-    """Test the Rendering Engine generates CSV according to profile."""
-    profile = get_profile("SRC-A")
-    engine = RenderingEngine(tmp_path, profile)
-
-    # Mock records
-    from datetime import datetime
-    from uuid import uuid4
-
-    record = OrganizationRecord(
-        organization_id=uuid4(),
-        organization_name="Test Org",
-        sector_code="SEC1",
-        scale_band="SMALL",
-        operating_model="UNKNOWN",
-        entity_criticality_band="STANDARD",
-        asset_count_declared=10,
-        critical_asset_count_declared=1,
-        default_timezone="UTC",
-        profile_effective_start_at_utc=datetime.now(UTC),
-        profile_version=1,
-        organization_status="ACTIVE",
-    )
-
-    manifest = engine.render_and_write("organization", [record])
-    assert manifest is not None
-
-    csv_file = tmp_path / manifest["path"]
-    assert csv_file.exists()
-
-    # SRC-A should be CSV
-    content = csv_file.read_text()
-    assert "org_id" in content
-    assert "org_name" in content
-    assert "Test Org" in content
-
-    # Check oracle registered the mapping
-    assert len(engine.oracle.mappings) > 0
-
-    # Test Parse-back validation (round-trip canonical -> source -> canonical via Oracle)
-    canonical_val = engine.oracle.get_canonical_for_source("SRC-A", manifest["path"], 0)
-    assert canonical_val["organization_id"] == str(record.organization_id)
-    assert canonical_val["organization_name"] == "Test Org"
+    # Test True Parse-Back for all profiles
+    for profile_id in ["SRC-A", "SRC-B", "SRC-C", "SRC-D", "SRC-E"]:
+        # Check an evidence family we know exists, like 'organization' or 'submission'
+        for family in ["organization", "submission", "alert", "submission_manifest"]:
+            # If the profile wasn't used for this family in builder distribution, it will be skipped by parse_and_validate
+            parse_and_validate(result.operational_root, oracle_dir, profile_id, family)
 
 
-def test_rendering_engine_json(tmp_path: Path) -> None:
-    """Test the Rendering Engine generates JSON according to profile."""
-    profile = get_profile("SRC-C")
-    engine = RenderingEngine(tmp_path, profile)
+def test_corruption_field_value(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
+    """Test A - field corruption."""
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    csv_file = result.operational_root / "organization_src-a.csv"
 
-    from datetime import datetime
-    from uuid import uuid4
+    # Corrupt
+    content = csv_file.read_text(encoding="utf-8")
+    content = content.replace("ACTIVE", "CORRUPTED")
+    csv_file.write_text(content, encoding="utf-8")
 
-    record = OrganizationRecord(
-        organization_id=uuid4(),
-        organization_name="JSON Org",
-        sector_code="SEC1",
-        scale_band="SMALL",
-        operating_model="UNKNOWN",
-        entity_criticality_band="STANDARD",
-        asset_count_declared=10,
-        critical_asset_count_declared=1,
-        default_timezone="UTC",
-        profile_effective_start_at_utc=datetime.now(UTC),
-        profile_version=1,
-        organization_status="ACTIVE",
-    )
-
-    manifest = engine.render_and_write("organization", [record])
-    assert manifest is not None
-
-    json_file = tmp_path / manifest["path"]
-    assert json_file.exists()
-
-    # SRC-C should be JSON
-    with json_file.open() as f:
-        data = json.load(f)
-        assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]["organization_id"] == str(record.organization_id)
-        assert data[0]["organizationName"] == "JSON Org"
+    with pytest.raises(ValueError, match="Parse-back failure"):
+        parse_and_validate(result.operational_root, tmp_path / "canonical_reference", "SRC-A", "organization")
 
 
-def test_oracle_determinism() -> None:
-    """Ensure Oracle determinism by hashing."""
-    oracle1 = CanonicalOracle()
-    oracle2 = CanonicalOracle()
+def test_corruption_missing_record(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
+    """Test E - missing source record."""
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    csv_file = result.operational_root / "organization_src-a.csv"
 
-    from uuid import uuid4
+    # Corrupt by removing last line
+    lines = csv_file.read_text(encoding="utf-8").strip().split("\n")
+    csv_file.write_text("\n".join(lines[:-1]), encoding="utf-8")
 
-    cid = uuid4()
+    with pytest.raises(AssertionError, match="Record count mismatch"):
+        parse_and_validate(result.operational_root, tmp_path / "canonical_reference", "SRC-A", "organization")
 
-    m1 = OracleMappingRecord(
-        source_profile="SRC-A",
-        source_file_path="org.csv",
-        source_record_index=0,
-        source_field_name="org_id",
-        canonical_family="organization",
-        canonical_record_id=cid,
-        canonical_field_name="organization_id",
-        canonical_value=str(cid),
-        rendered_value=str(cid),
-    )
 
-    oracle1.register_mapping(m1)
-    oracle2.register_mapping(m1)
+def test_reproducibility(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
+    """Verify same seed produces byte-identical output hashes."""
+    run1 = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path / "run1")
+    run2 = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path / "run2")
 
-    assert oracle1.calculate_oracle_hash() == oracle2.calculate_oracle_hash()
+    assert run1.tree_sha256 == run2.tree_sha256
+
+def test_different_seed_variation(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
+    """Verify different seeds produce different outputs."""
+    seed1 = b"A" * 32
+    seed2 = b"B" * 32
+    run1 = build_m3_fixture(fixture_config_path, seed1, output_root=tmp_path / "run1")
+    run2 = build_m3_fixture(fixture_config_path, seed2, output_root=tmp_path / "run2")
+
+    assert run1.tree_sha256 != run2.tree_sha256

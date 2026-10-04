@@ -402,15 +402,17 @@ def _build_m3_fixture_internal(
     profile_a = get_profile("SRC-A")
     profile_b = get_profile("SRC-B")
     profile_c = get_profile("SRC-C")
+    profile_d = get_profile("SRC-D")
+    profile_e = get_profile("SRC-E")
 
-    # M3 specifically mandates mapping M2 canonical records into heterogeneous rendered output files
     engine_a = RenderingEngine(source_exports_root, profile_a)
     engine_b = RenderingEngine(source_exports_root, profile_b)
     engine_c = RenderingEngine(source_exports_root, profile_c)
+    engine_d = RenderingEngine(source_exports_root, profile_d)
+    engine_e = RenderingEngine(source_exports_root, profile_e)
 
     file_manifests = []
 
-    # We distribute records across engines based on simulated data source profiles
     f_org = engine_a.render_and_write("organization", organizations)
     if f_org:
         file_manifests.append(f_org)
@@ -419,31 +421,31 @@ def _build_m3_fixture_internal(
     if f_sub:
         file_manifests.append(f_sub)
 
-    f_man = engine_a.render_and_write("submission_manifest", submission_manifests)
+    f_man = engine_c.render_and_write("submission_manifest", submission_manifests)
     if f_man:
         file_manifests.append(f_man)
 
-    f_fam = engine_b.render_and_write("submission_family", submission_families)
+    f_fam = engine_d.render_and_write("submission_family", submission_families)
     if f_fam:
         file_manifests.append(f_fam)
 
-    f_cr = engine_c.render_and_write("control_process_reference", control_refs)
+    f_cr = engine_e.render_and_write("control_process_reference", control_refs)
     if f_cr:
         file_manifests.append(f_cr)
 
-    f_cl = engine_c.render_and_write("control_process_subject_link", control_links)
+    f_cl = engine_a.render_and_write("control_process_subject_link", control_links)
     if f_cl:
         file_manifests.append(f_cl)
 
-    f_asset = engine_a.render_and_write("asset", assets)
+    f_asset = engine_b.render_and_write("asset", assets)
     if f_asset:
         file_manifests.append(f_asset)
 
-    f_cov = engine_b.render_and_write("monitoring_coverage", coverages)
+    f_cov = engine_c.render_and_write("monitoring_coverage", coverages)
     if f_cov:
         file_manifests.append(f_cov)
 
-    f_al = engine_c.render_and_write("alert", alerts)
+    f_al = engine_d.render_and_write("alert", alerts)
     if f_al:
         file_manifests.append(f_al)
 
@@ -483,10 +485,12 @@ def _build_m3_fixture_internal(
     if f_pc:
         file_manifests.append(f_pc)
 
-    # Write oracle
-    engine_a.write_oracle(oracle_root / "oracle_a.json")
-    engine_b.write_oracle(oracle_root / "oracle_b.json")
-    engine_c.write_oracle(oracle_root / "oracle_c.json")
+    # Write oracle and provenance metadata
+    oracle_hash_a = engine_a.write_metadata(oracle_root, "src_a")
+    oracle_hash_b = engine_b.write_metadata(oracle_root, "src_b")
+    oracle_hash_c = engine_c.write_metadata(oracle_root, "src_c")
+    oracle_hash_d = engine_d.write_metadata(oracle_root, "src_d")
+    oracle_hash_e = engine_e.write_metadata(oracle_root, "src_e")
 
     record_counts = {
         "organization": len(organizations),
