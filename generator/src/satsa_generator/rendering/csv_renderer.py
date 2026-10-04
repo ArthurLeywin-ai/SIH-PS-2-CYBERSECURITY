@@ -56,8 +56,15 @@ class CSVRenderer(BaseRenderer):
             # Get relationships from operational records, NOT from oracle
             rels = self.get_relationships_for_record(canonical_id, family, context)
             for r_k, r_v in rels.items():
-                # Relationships are always lists now
-                record_dict[r_k] = [str(x) for x in r_v]
+                if isinstance(r_v, list):
+                    record_dict[r_k] = [str(x) for x in r_v]
+                else:
+                    record_dict[r_k] = str(r_v)
+
+            family_map = context.profile.family_mappings.get(family, {})
+            for f_name, f_map in family_map.items():
+                if f_map.is_present and f_name not in record_dict:
+                    record_dict[f_name] = f_map.default_if_missing
 
             for canonical_field, canonical_value in record_dict.items():
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)

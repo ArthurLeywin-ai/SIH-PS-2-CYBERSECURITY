@@ -451,6 +451,13 @@ def _build_m3_fixture_internal(
                 if alerts_for_case:
                     rels["alerts"] = alerts_for_case
 
+            # For alert -> case foreign key
+            if family_name == "alert":
+                for link in case_alert_links:
+                    if link.alert_id == canonical_id:
+                        rels["case_id"] = link.case_id
+                        break
+
             oracle.register_expected_record(
                 CanonicalRecordState(
                     canonical_record_id=canonical_id,
@@ -505,6 +512,15 @@ def _build_m3_fixture_internal(
                     relationship_subject_field="case_id",
                     relationship_object_field="case_id",
                     relationship_target_field="alert_id",
+                )
+            elif fam_name == "alert":
+                f_rendered = engine.render_and_write(
+                    "alert",
+                    alerts,
+                    relationship_records=case_alert_links,
+                    relationship_subject_field="alert_id",
+                    relationship_object_field="alert_id",
+                    relationship_target_field="case_id",
                 )
             else:
                 f_rendered = engine.render_and_write(fam_name, rec_list)

@@ -14,9 +14,10 @@ def parse_and_validate(
     oracle_root: Path,
     profile_id: str,
     evidence_family: str,
+    version: str | None = None,
 ) -> None:
     """Parse generated source artifacts back into canonical state and validate against oracle."""
-    profile = get_profile(profile_id)
+    profile = get_profile(profile_id, version=version)
     fmt = profile.get_format(evidence_family)
     ext = fmt.lower()
 

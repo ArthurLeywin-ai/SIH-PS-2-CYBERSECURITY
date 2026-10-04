@@ -67,7 +67,7 @@ class BaseRenderer(abc.ABC):
         if not subject_field or not object_field or not target_field:
             return {}
 
-        rels = {}
+        rels: dict[str, UUID | list[UUID]] = {}
         for rel_record in context.relationship_records:
             rel_dict = rel_record.model_dump()
             subject_id = rel_dict.get(subject_field)
@@ -76,16 +76,22 @@ class BaseRenderer(abc.ABC):
             if subject_id == canonical_id:
                 target_id = rel_dict.get(target_field)
                 if target_id:
-                    # Handle list relationships - always use plural form as key
-                    # and always store as list for consistency with oracle
-                    key = (
-                        target_field.replace("_id", "s")
-                        if target_field.endswith("_id")
-                        else target_field
-                    )
-                    if key not in rels:
-                        rels[key] = []
-                    rels[key].append(target_id)
+                    if target_field == "case_id":
+                        # Scalar relationship embedded directly (e.g. alert -> case_id)
+                        rels["case_id"] = target_id
+                    else:
+                        # Handle list relationships - always use plural form as key
+                        # and always store as list for consistency with oracle
+                        key = (
+                            target_field.replace("_id", "s")
+                            if target_field.endswith("_id")
+                            else target_field
+                        )
+                        if key not in rels:
+                            rels[key] = []
+                        val = rels[key]
+                        if isinstance(val, list):
+                            val.append(target_id)
         return rels
 
     def apply_field_mapping(

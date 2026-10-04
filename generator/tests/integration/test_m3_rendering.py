@@ -370,40 +370,367 @@ def test_renderer_independence_from_oracle(
 def test_vocabulary_pass_through_unknown(
     tmp_path: Path, fixture_config_path: Path, master_seed: bytes
 ) -> None:
+    """Verify real artifact unknown-token behavior:
+
+    1. Profiles with on_unknown='fail' (e.g., SRC-B) fail when encountering an unknown token.
+    2. Profiles with on_unknown='pass_through' (SRC-D) preserve the unknown token
+       into canonical state.
     """
-    Test that vocabulary with on_unknown="pass_through" preserves unknown values
-    instead of failing.
-    """
+    import csv
+
     result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    oracle_dir = tmp_path / "canonical_reference"
 
-    # SRC-D has on_unknown="pass_through" for severity
-    # Check that the alert file for SRC-D exists and can be parsed
-    alert_file = result.operational_root / "alert_src-d.jsonl"
-    assert alert_file.exists(), "SRC-D alert file should exist"
+    # Part 1: Test that on_unknown='fail' actually fails on disk artifact
+    submission_b_path = result.operational_root / "submission_src-b.csv"
+    with submission_b_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        sub_fields = reader.fieldnames
+        sub_rows = list(reader)
 
-    # Parse the JSONL file
-    lines = alert_file.read_text(encoding="utf-8").strip().split("\n")
-    assert len(lines) > 0, "Should have alert records"
+    sub_rows[0]["PeriodMaturityState"] = "999"
 
-    # Parse first record
+    with submission_b_path.open("w", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=sub_fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(sub_rows)
+
+    with pytest.raises(ValueError, match="Unmapped vocabulary value during parse-back: 999"):
+        parse_and_validate(result.operational_root, oracle_dir, "SRC-B", "submission")
+
+    # Part 2: Test that on_unknown='pass_through' on SRC-D preserves unknown tokens
+    alert_d_path = result.operational_root / "alert_src-d.jsonl"
+    lines = alert_d_path.read_text(encoding="utf-8").strip().split("\n")
     first_record = json.loads(lines[0])
-    # SRC-D uses abbreviated field names
-    assert "ale_sev" in first_record, "SRC-D should have ale_sev field"
-    # The value should be a valid mapped value (not an error)
-    assert first_record["ale_sev"] in ["standard", "elevated", "high", "unknown"], (
-        f"Unexpected severity value: {first_record['ale_sev']}"
+    unknown_token = "custom-vendor-sev-unknown-level-x"
+    first_record["ale_sev"] = unknown_token
+    lines[0] = json.dumps(first_record)
+    alert_d_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Update oracle expectation for record 0 to match the pass-through value
+    oracle_d_path = oracle_dir / "src_d_oracle.json"
+    oracle_d_data = json.loads(oracle_d_path.read_text(encoding="utf-8"))
+    index_d_path = oracle_dir / "src_d_index.json"
+    index_d_data = json.loads(index_d_path.read_text(encoding="utf-8"))
+
+    # Find canonical record ID for locator [0]
+    rec0_id = None
+    for idx_entry in index_d_data:
+        if idx_entry["evidence_family"] == "alert" and idx_entry["source_record_locator"] == "[0]":
+            rec0_id = idx_entry["canonical_record_id"]
+            break
+    assert rec0_id is not None
+
+    for r in oracle_d_data:
+        if r["canonical_record_id"] == rec0_id:
+            r["fields"]["severity"] = unknown_token
+            break
+    oracle_d_path.write_text(json.dumps(oracle_d_data, indent=2), encoding="utf-8")
+
+    # Validation must SUCCEED because on_unknown='pass_through' preserved the token!
+    parse_and_validate(result.operational_root, oracle_dir, "SRC-D", "alert")
+
+    # Part 3: Test that injecting the same unknown token into SRC-B severity fails
+    alert_b_path = result.operational_root / "alert_src-b.csv"
+    with alert_b_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        alert_fields = reader.fieldnames
+        b_alert_rows = list(reader)
+
+    b_alert_rows[0]["Severity"] = unknown_token
+
+    with alert_b_path.open("w", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=alert_fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(b_alert_rows)
+
+    with pytest.raises(ValueError, match="Unmapped vocabulary value during parse-back"):
+        parse_and_validate(result.operational_root, oracle_dir, "SRC-B", "alert")
+
+
+def test_src_b_embedded_case_relationship(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Verify SRC-B genuinely embeds CaseId in alert CSV on disk and reconstructs correctly."""
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    oracle_dir = tmp_path / "canonical_reference"
+
+    # 1. Verify alert_src-b.csv exists on disk and contains CaseId column
+    alert_csv_path = result.operational_root / "alert_src-b.csv"
+    assert alert_csv_path.exists(), "alert_src-b.csv must exist on disk"
+
+    import csv
+
+    with alert_csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        assert "CaseId" in reader.fieldnames, "SRC-B alert CSV must have CaseId in header"
+        rows = list(reader)
+        assert len(rows) > 0
+
+        # Verify that rows associated with a case contain a valid UUID
+        case_ids_found = [row["CaseId"] for row in rows if row.get("CaseId")]
+        assert len(case_ids_found) > 0, "At least one alert must have an embedded CaseId"
+        for cid in case_ids_found:
+            uuid.UUID(cid)
+
+    # 2. Verify parse-back succeeds for SRC-B alert
+    parse_and_validate(result.operational_root, oracle_dir, "SRC-B", "alert")
+
+    # 3. Verify that removing or corrupting the CaseId column causes parse-back to fail
+    corrupted_rows = []
+    with alert_csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
+        for row in reader:
+            row_copy = dict(row)
+            if row_copy.get("CaseId"):
+                row_copy["CaseId"] = ""
+            corrupted_rows.append(row_copy)
+
+    with alert_csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(corrupted_rows)
+
+    with pytest.raises(ValueError, match="Parse-back rel failure.*rel case_id"):
+        parse_and_validate(result.operational_root, oracle_dir, "SRC-B", "alert")
+
+
+def test_src_c_native_vs_generated_child_identities(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Verify SRC-C identity contract: parent has native ID, child lacks native ID on disk."""
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    oracle_dir = tmp_path / "canonical_reference"
+
+    case_path = result.operational_root / "case_src-c.json"
+    link_path = result.operational_root / "case_alert_link_src-c.json"
+
+    assert case_path.exists(), "case_src-c.json must exist"
+    assert link_path.exists(), "case_alert_link_src-c.json must exist"
+
+    # Parent record: case MUST have native ID 'caseId'
+    case_data = json.loads(case_path.read_text(encoding="utf-8"))
+    assert len(case_data) > 0
+    for case_obj in case_data:
+        assert "caseId" in case_obj, "Parent case record must have native 'caseId'"
+        uuid.UUID(case_obj["caseId"])
+
+    # Child record: case_alert_link MUST NOT have native ID 'caseAlertLinkId' on disk
+    link_data = json.loads(link_path.read_text(encoding="utf-8"))
+    assert len(link_data) > 0
+    for link_obj in link_data:
+        assert "caseAlertLinkId" not in link_obj, (
+            "Child case_alert_link record must omit native child ID"
+        )
+        assert "id" not in link_obj
+        # But foreign references must be present
+        assert "caseId" in link_obj, "Child record must have reference 'caseId'"
+        assert "alertId" in link_obj, "Child record must have reference 'alertId'"
+
+    # Reconstruction must succeed for both parent and child using locators
+    parse_and_validate(result.operational_root, oracle_dir, "SRC-C", "case")
+    parse_and_validate(result.operational_root, oracle_dir, "SRC-C", "case_alert_link")
+
+
+def test_src_e_migration_boundary(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Verify SRC-E migration semantics: Period A (V1) vs Period B (V2).
+
+    Demonstrates:
+    - Layout: all-CSV in Period A vs CSV/JSON hybrid in Period B
+    - Field names: legacy names (alert_id, created_at_utc, disposition) vs
+      modernized (id, timestamp_utc, outcome)
+    - Timestamp precision: iso_z (seconds) vs iso_offset_ms (milliseconds)
+    - Vocabulary drift: canonical terms (HIGH, MALWARE, TRUE_POSITIVE) vs
+      drifted codes (HI, MALW, TP)
+    - Relationship: old foreign key (case_id in alert) vs new link object
+      (linked_alert_ids in case)
+    - Canonical reconciliation: both reconcile to the exact same canonical oracle.
+    """
+    from satsa_generator.config.models import load_config
+    from satsa_generator.fixture.builder import _generate_m2_records, validate_m2_fixture_records
+    from satsa_generator.ids.service import IDService
+    from satsa_generator.profiles.catalog import get_src_e_v1, get_src_e_v2
+    from satsa_generator.seeds.manager import SeedManager
+
+    config = load_config(fixture_config_path)
+    seeds = SeedManager(master_seed)
+    ids = IDService(config.dataset_namespace)
+    records = _generate_m2_records(config, seeds, ids)
+    validate_m2_fixture_records(*records)
+
+    (
+        organizations,
+        submissions,
+        submission_manifests,
+        submission_families,
+        control_refs,
+        control_links,
+        assets,
+        coverages,
+        alerts,
+        cases,
+        case_alert_links,
+        investigations,
+        escalations,
+        actions,
+        resolutions,
+        closures,
+        exceptions,
+        process_changes,
+    ) = records
+
+    # Build canonical oracle from operational records
+    oracle = CanonicalOracle()
+    for family_name, rec_list in [
+        ("case", cases),
+        ("alert", alerts),
+    ]:
+        for idx, record in enumerate(rec_list):
+            record_dict = record.model_dump(mode="json")
+            record_obj_dict = record.model_dump()
+            canonical_id = record_obj_dict.get(f"{family_name}_id") or uuid.UUID(int=idx)
+
+            rels = {}
+            for k, v in record_obj_dict.items():
+                if k.endswith("_id") and k != f"{family_name}_id" and isinstance(v, uuid.UUID):
+                    rels[k] = v
+
+            if family_name == "case":
+                alerts_for_case = [
+                    link.alert_id for link in case_alert_links if link.case_id == canonical_id
+                ]
+                if alerts_for_case:
+                    rels["alerts"] = alerts_for_case
+
+            if family_name == "alert":
+                for link in case_alert_links:
+                    if link.alert_id == canonical_id:
+                        rels["case_id"] = link.case_id
+                        break
+
+            oracle.register_expected_record(
+                CanonicalRecordState(
+                    canonical_record_id=canonical_id,
+                    canonical_family=family_name,
+                    fields=record_dict,
+                    relationships=rels,
+                )
+            )
+
+    oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
+
+    # --- PERIOD A (pre-migration, V1) ---
+    p01_root = tmp_path / "period_a_exports"
+    p01_oracle_root = tmp_path / "period_a_oracle"
+    p01_oracle_root.mkdir(parents=True, exist_ok=True)
+    (p01_oracle_root / "src_e_oracle.json").write_text(
+        json.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
     )
 
-    # Now test that unknown values are preserved (pass-through)
-    # We can't easily inject unknown values without modifying the fixture,
-    # but we can verify the vocabulary mapping is configured correctly
-    from satsa_generator.profiles.catalog import get_profile
+    profile_v1 = get_src_e_v1()
+    assert profile_v1.version == "1.0"
+    engine_v1 = RenderingEngine(p01_root, profile_v1)
 
-    profile_d = get_profile("SRC-D")
-    alert_mapping = profile_d.family_mappings.get("alert", {})
-    sev_mapping = alert_mapping.get("severity")
-    assert sev_mapping is not None
-    assert sev_mapping.vocabulary is not None
-    assert sev_mapping.vocabulary.on_unknown == "pass_through", (
-        "SRC-D severity should have on_unknown=pass_through"
+    engine_v1.render_and_write(
+        "case",
+        cases,
+        relationship_records=case_alert_links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
     )
+    engine_v1.render_and_write(
+        "alert",
+        alerts,
+        relationship_records=case_alert_links,
+        relationship_subject_field="alert_id",
+        relationship_object_field="alert_id",
+        relationship_target_field="case_id",
+    )
+    engine_v1.write_metadata(p01_oracle_root, "src_e")
+
+    # --- PERIOD B (post-migration, V2) ---
+    p02_root = tmp_path / "period_b_exports"
+    p02_oracle_root = tmp_path / "period_b_oracle"
+    p02_oracle_root.mkdir(parents=True, exist_ok=True)
+    (p02_oracle_root / "src_e_oracle.json").write_text(
+        json.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+    profile_v2 = get_src_e_v2()
+    assert profile_v2.version == "2.0"
+    engine_v2 = RenderingEngine(p02_root, profile_v2)
+
+    engine_v2.render_and_write(
+        "case",
+        cases,
+        relationship_records=case_alert_links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
+    engine_v2.render_and_write(
+        "alert",
+        alerts,
+        relationship_records=case_alert_links,
+        relationship_subject_field="alert_id",
+        relationship_object_field="alert_id",
+        relationship_target_field="case_id",
+    )
+    engine_v2.write_metadata(p02_oracle_root, "src_e")
+
+    # --- VERIFY DISK DIFFERENCES ACROSS MIGRATION BOUNDARY ---
+    # 1. Format change: Period A is CSV; Period B is JSON
+    v1_alert_file = p01_root / "alert_src-e.csv"
+    v2_alert_file = p02_root / "alert_src-e.json"
+    assert v1_alert_file.exists(), "Pre-migration alert must be CSV"
+    assert v2_alert_file.exists(), "Post-migration alert must be JSON"
+
+    v1_case_file = p01_root / "case_src-e.csv"
+    v2_case_file = p02_root / "case_src-e.json"
+    assert v1_case_file.exists(), "Pre-migration case must be CSV"
+    assert v2_case_file.exists(), "Post-migration case must be JSON"
+
+    # 2. Field names & relationships in Period A (V1)
+    import csv
+
+    with v1_alert_file.open("r", encoding="utf-8") as f:
+        v1_reader = csv.DictReader(f)
+        assert "alert_id" in v1_reader.fieldnames, "V1 uses legacy alert_id"
+        assert "case_id" in v1_reader.fieldnames, "V1 embeds old FK case_id in alert"
+        assert "created_at_utc" in v1_reader.fieldnames, "V1 uses created_at_utc"
+        v1_alert_rows = list(v1_reader)
+        # Check ISO Z timestamp format in V1
+        assert v1_alert_rows[0]["created_at_utc"].endswith("Z")
+        # Check pre-drift vocabulary (full words like HIGH, MEDIUM)
+        v1_sevs = {r["severity"] for r in v1_alert_rows}
+        assert any(s in ("HIGH", "MEDIUM", "LOW", "CRITICAL") for s in v1_sevs)
+
+    with v1_case_file.open("r", encoding="utf-8") as f:
+        v1_case_reader = csv.DictReader(f)
+        assert "alerts" not in v1_case_reader.fieldnames, "V1 case does not have link array"
+
+    # 3. Field names & relationships in Period B (V2)
+    v2_alert_rows = json.loads(v2_alert_file.read_text(encoding="utf-8"))
+    assert "id" in v2_alert_rows[0], "V2 uses modernized 'id'"
+    assert "case_id" not in v2_alert_rows[0], "V2 alert does not embed case_id"
+    assert "timestamp_utc" in v2_alert_rows[0], "V2 uses 'timestamp_utc'"
+    # Check timestamp format with offset
+    assert "+00:00" in v2_alert_rows[0]["timestamp_utc"]
+    # Check drifted vocabulary codes (HI, MED, CRIT)
+    v2_sevs = {r["event_severity"] for r in v2_alert_rows}
+    assert any(s in ("HI", "MED", "LO", "CRIT") for s in v2_sevs)
+
+    v2_case_rows = json.loads(v2_case_file.read_text(encoding="utf-8"))
+    assert "linked_alert_ids" in v2_case_rows[0], "V2 case has new link object array"
+    assert isinstance(v2_case_rows[0]["linked_alert_ids"], list)
+
+    # --- PROVE CANONICAL RECONCILIATION FOR BOTH PERIODS ---
+    parse_and_validate(p01_root, p01_oracle_root, "SRC-E", "case", version="1.0")
+    parse_and_validate(p01_root, p01_oracle_root, "SRC-E", "alert", version="1.0")
+
+    parse_and_validate(p02_root, p02_oracle_root, "SRC-E", "case", version="2.0")
+    parse_and_validate(p02_root, p02_oracle_root, "SRC-E", "alert", version="2.0")
