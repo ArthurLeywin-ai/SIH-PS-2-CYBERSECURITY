@@ -13,3 +13,5 @@ generator/.git-backup/
 **/dist/
 **/build/
 **/*.egg-info/
+.kilo/
+

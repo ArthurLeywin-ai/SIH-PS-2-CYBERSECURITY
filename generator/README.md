@@ -44,7 +44,13 @@ pytest
 satsa-gen validate-config config/public/base/fixture_config.json
 satsa-gen freeze-config config/public/base/fixture_config.json
 
-# Build the Milestone 2 operational base-world fixture (default)
+# Build the Milestone 4 scenario-mutated fixture with private ground truth
+satsa-gen build-fixture config/public/base/fixture_config.json \
+  --seed 1111111111111111111111111111111111111111111111111111111111111111 \
+  --milestone m4 \
+  --output ./artifacts/m4-fixture
+
+# Build the Milestone 2 operational base-world fixture
 satsa-gen build-fixture config/public/base/fixture_config.json \
   --seed 1111111111111111111111111111111111111111111111111111111111111111 \
   --milestone m2 \
@@ -61,12 +67,13 @@ satsa-gen --help
 ```
 
 The output directory must be absent or empty. The builder will not silently
-overwrite artifacts. The M2 fixture writes all 18 canonical operational evidence families:
+overwrite artifacts. The M4 fixture produces operational evidence alongside a strictly
+separated private ground-truth package:
 
 ```text
-artifacts/m2-fixture/
+artifacts/m4-fixture/
   operational_evidence/
-    fixture_manifest.json
+    fixture_manifest.json (contract: SATSA-M4-FIXTURE-V1)
     organizations.json
     submissions.json
     submission_manifests.json
@@ -85,6 +92,9 @@ artifacts/m2-fixture/
     closures.json
     exceptions.json
     process_changes.json
+  private_ground_truth/
+    ground_truth.json
+    authorization_ledger.json
 ```
 
 The published seed above is for the development fixture only. Validation and
@@ -97,6 +107,7 @@ held-out seeds must not be committed or exposed.
 - **Fail-loud:** Invalid config, referential breaks, or temporal violations halt generation.
 - **Truth-isolated:** Zero ground-truth leakage, scenario IDs, or detector markers in operational evidence.
 - **Detector-independent:** Generator never imports SAT-SA analytics config or detector thresholds.
+- **Authorized Mutation:** Every mutation must be pre-authorized in the authorization ledger and verified post-mutation.
 
 ## Reproducibility & Integrity
 
@@ -127,35 +138,41 @@ generator/
     seeds/         # Master/child seed derivation, RNG registry
     ids/           # Deterministic UUID/source-ID service
     cli/           # Command-line interface
-    fixture/       # M1 and M2 schema-valid operational fixture builders & models
+    fixture/       # M1-M4 schema-valid operational fixture builders & models
+    scenarios/     # M4 catalog, ledger, selectors, mutators, controls, validators, truth writer
+    rendering/     # Source rendering framework (SRC-A through SRC-E)
+    provenance/    # Lineage tracking and provenance manifests
+    canonical/     # Canonical schemas, field mappings, and canonical oracle
   tests/
-    unit/          # Unit tests for core services and builder
-    contract/      # Strict DATA_SCHEMA.md contract round-trip tests
-    integration/   # Integration, referential, temporal, offline, and reproducibility tests
+    unit/          # Unit tests for core services, catalog, ledger, selectors, mutators, controls
+    contract/      # Strict DATA_SCHEMA.md contract round-trip and fixture contract tests
+    integration/   # Integration, referential, temporal, offline, and scenario engine tests
     property/      # Hypothesis property tests
 ```
 
 ## Current Status
 
-**Milestone 3 (Source Profiles, Canonical Oracle, and Provenance) implemented and tested.**
+**Milestone 4 (Scenario and Legitimate-Control Engine) implemented and validated.**
 
 Implemented:
 
-- Complete Pydantic schemas for all 18 operational evidence families per `DATA_SCHEMA.md`;
-- Base-world generation logic populating operational entities across organizations, periods, assets, coverages, alerts, cases, triage investigations, escalations, remediation actions, resolutions, closures, exceptions, and process changes;
-- Comprehensive referential integrity validator (`validate_m2_fixture_records`);
-- Temporal ordering validator enforcing causal lifecycle consistency;
-- Source renderers framework (SRC-A through SRC-E contracts) with CSV and JSON implementations;
-- Canonical oracle and provenance logic for field-level mapping round-trips;
-- Offline, byte-identical deterministic serialization with SHA-256 manifest and tree hash;
-- Comprehensive test suite (55 passing unit, contract, integration, temporal, and reproducibility tests).
+- **Scenario Models & Catalog:** Strict schemas for all 7 scenario families (`EXECUTION_GAP`, `NEGATIVE_SPACE`, `HISTORICAL_REPETITION`, `PEER_COMPARISON`, `CROSS_RECORD`, `LEGITIMATE_UNUSUAL`, `AMBIGUOUS_INSUFFICIENT`) and 9 canonical scenario definitions with explicit prerequisites and applicable realization states.
+- **Authorization Ledger:** Enforces `PLANNED -> APPLIED -> VALIDATED` lifecycle; detects and rejects unauthorized mutations, conflicting authorizations on identical target records, and duplicate authorization IDs; validates complete consumption of all planned authorizations.
+- **Deterministic Selectors:** Target reservation preventing collateral mutations, semantic prerequisite filtering, and deterministic selection via seed streams.
+- **Copy-on-Write Mutators:** Immutable mutation pipeline generating detailed `MutationReceipt` entries capturing exact before/after state and provenance.
+- **Read-Only Semantic Validators:** Verifies expected operational conditions after mutation without performing silent repairs; records passed/failed assertions in `ScenarioValidationReport`.
+- **Legitimate-Control Engine:** Produces genuine operational `ExceptionRecord` and `ProcessChangeRecord` entities for legitimate unusual and ambiguous control contexts.
+- **Private Ground-Truth Separation:** Outputs `ground_truth.json` and `authorization_ledger.json` in a distinct `private_ground_truth/` directory; `LeakageScanner` verifies zero leakage of ground truth, scenario tokens, or private metadata into operational packages.
+- **Milestone 4 Fixture & CLI Integration:** `build_m4_fixture` producing `SATSA-M4-FIXTURE-V1` contract with deterministic tree SHA-256 and bitwise reproducibility.
+- **Comprehensive Test Suite:** 112 passing tests across unit, contract, integration, temporal, and reproducibility test suites.
 
-Intentionally not implemented yet (Milestone 4+ scope):
+Intentionally not implemented yet (Milestone 5+ scope):
 
-- Scenarios, legitimate controls, or data-quality mutations (M4);
-- Hidden ground-truth and evaluation answer key packages (M4);
-- Full multi-organization large-scale dataset generation.
+- Quality mutations, 14 validation gates, and canary leakage scanner test cases (M5);
+- Full multi-organization large-scale dataset generation;
+- SAT-SA analytics, detectors, risk scoring, ML models, backend, frontend, and dashboards.
 
 ## License
 
 Proprietary — SIH 2026 (SIH26157)
+

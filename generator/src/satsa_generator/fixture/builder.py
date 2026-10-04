@@ -106,10 +106,12 @@ def build_fixture(
     master_seed: bytes,
     *,
     output_root: Path | None = None,
-    milestone: Literal["m1", "m2", "m3"] = "m1",
+    milestone: Literal["m1", "m2", "m3", "m4"] = "m1",
 ) -> FixtureBuildResult:
     """Build a deterministic fixture without truth or scenario metadata."""
-    if milestone == "m3":
+    if milestone == "m4":
+        return _build_m4_fixture_internal(config_path, master_seed, output_root=output_root)
+    elif milestone == "m3":
         return _build_m3_fixture_internal(config_path, master_seed, output_root=output_root)
     elif milestone == "m2":
         return _build_m2_fixture_internal(config_path, master_seed, output_root=output_root)
@@ -134,6 +136,16 @@ def build_m3_fixture(
 ) -> FixtureBuildResult:
     """Convenience function to build Milestone 3 source rendering fixture."""
     return build_fixture(config_path, master_seed, output_root=output_root, milestone="m3")
+
+
+def build_m4_fixture(
+    config_path: Path,
+    master_seed: bytes,
+    *,
+    output_root: Path | None = None,
+) -> FixtureBuildResult:
+    """Convenience function to build Milestone 4 scenario-mutated fixture."""
+    return build_fixture(config_path, master_seed, output_root=output_root, milestone="m4")
 
 
 def _build_m1_fixture_internal(
@@ -535,6 +547,158 @@ def _build_m3_fixture_internal(
     return FixtureBuildResult(
         output_root=root,
         operational_root=source_exports_root,
+        manifest_path=manifest_path,
+        tree_sha256=tree_sha256,
+        record_counts=record_counts,
+    )
+
+
+def _build_m4_fixture_internal(
+    config_path: Path,
+    master_seed: bytes,
+    *,
+    output_root: Path | None = None,
+) -> FixtureBuildResult:
+    config = load_config(config_path)
+    if config.tier.value != "deterministic_fixture":
+        raise FixtureBuildError(
+            "The Milestone 4 fixture builder only accepts tier=deterministic_fixture."
+        )
+
+    root = output_root if output_root is not None else Path(config.output_root)
+    root = root.expanduser()
+    _require_empty_output_root(root)
+
+    operational_root = root / "operational_evidence"
+    seeds = SeedManager(master_seed)
+    ids = IDService(config.dataset_namespace)
+
+    base_records = _generate_m2_records(config, seeds, ids)
+    validate_m2_fixture_records(*base_records)
+
+    records_dict: dict[str, list[Any]] = {
+        "organization": list(base_records[0]),
+        "submission": list(base_records[1]),
+        "submission_manifest": list(base_records[2]),
+        "submission_family": list(base_records[3]),
+        "control_process_reference": list(base_records[4]),
+        "control_process_subject_link": list(base_records[5]),
+        "asset": list(base_records[6]),
+        "monitoring_coverage": list(base_records[7]),
+        "alert": list(base_records[8]),
+        "case": list(base_records[9]),
+        "case_alert_link": list(base_records[10]),
+        "investigation": list(base_records[11]),
+        "escalation": list(base_records[12]),
+        "action": list(base_records[13]),
+        "resolution": list(base_records[14]),
+        "closure": list(base_records[15]),
+        "exception": list(base_records[16]),
+        "process_change": list(base_records[17]),
+    }
+
+    from satsa_generator.scenarios.engine import ScenarioEngine
+    from satsa_generator.scenarios.truth import LeakageScanner
+
+    engine = ScenarioEngine(ids, seeds)
+    exec_result = engine.run_scenarios(records_dict)
+
+    # Write private ground truth and ledger (strictly separate from operational root)
+    engine.write_private_package(root)
+
+    mutated = exec_result.records
+
+    context = _make_context(
+        config, root, seeds.private_ledger_hash(), contract="SATSA-M4-FIXTURE-V1"
+    )
+
+    payloads = {
+        "organizations.json": _serialize_records(mutated["organization"]),
+        "submissions.json": _serialize_records(mutated["submission"]),
+        "submission_manifests.json": _serialize_records(mutated["submission_manifest"]),
+        "submission_evidence_families.json": _serialize_records(mutated["submission_family"]),
+        "control_process_references.json": _serialize_records(mutated["control_process_reference"]),
+        "control_process_subject_links.json": _serialize_records(
+            mutated["control_process_subject_link"]
+        ),
+        "assets.json": _serialize_records(mutated["asset"]),
+        "monitoring_coverage.json": _serialize_records(mutated["monitoring_coverage"]),
+        "alerts.json": _serialize_records(mutated["alert"]),
+        "cases.json": _serialize_records(mutated["case"]),
+        "case_alert_links.json": _serialize_records(mutated["case_alert_link"]),
+        "investigations.json": _serialize_records(mutated["investigation"]),
+        "escalations.json": _serialize_records(mutated["escalation"]),
+        "actions.json": _serialize_records(mutated["action"]),
+        "resolutions.json": _serialize_records(mutated["resolution"]),
+        "closures.json": _serialize_records(mutated["closure"]),
+        "exceptions.json": _serialize_records(mutated["exception"]),
+        "process_changes.json": _serialize_records(mutated["process_change"]),
+    }
+
+    # Verify zero leakage of private truth / seeds into operational evidence
+    import json as json_leakage
+
+    for _name, content in payloads.items():
+        parsed_payload = json_leakage.loads(content.decode("utf-8"))
+        LeakageScanner.assert_no_leakage(parsed_payload)
+
+    files = [
+        {
+            "path": name,
+            "byte_size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        for name, content in sorted(payloads.items())
+    ]
+
+    record_counts = {
+        "organization": len(mutated["organization"]),
+        "submission": len(mutated["submission"]),
+        "submission_manifest": len(mutated["submission_manifest"]),
+        "submission_evidence_family": len(mutated["submission_family"]),
+        "control_process_reference": len(mutated["control_process_reference"]),
+        "control_process_subject_link": len(mutated["control_process_subject_link"]),
+        "asset": len(mutated["asset"]),
+        "monitoring_coverage": len(mutated["monitoring_coverage"]),
+        "alert": len(mutated["alert"]),
+        "case": len(mutated["case"]),
+        "case_alert_link": len(mutated["case_alert_link"]),
+        "investigation": len(mutated["investigation"]),
+        "escalation": len(mutated["escalation"]),
+        "action": len(mutated["action"]),
+        "resolution": len(mutated["resolution"]),
+        "closure": len(mutated["closure"]),
+        "exception": len(mutated["exception"]),
+        "process_change": len(mutated["process_change"]),
+    }
+
+    manifest = FixtureManifest(
+        fixture_contract="SATSA-M4-FIXTURE-V1",
+        dataset_id=ids.generate("dataset", config.tier.value, config.split.value),
+        dataset_version=f"{config.generator_version}-m4-{context.version.sha256()[:12]}",
+        generator_version=config.generator_version,
+        generator_build_hash=context.version.generator_build_hash,
+        schema_version=config.schema_version,
+        config_sha256=context.config_hash,
+        version_tuple_sha256=context.version.sha256(),
+        seed_derivation_version=config.seed_derivation_version,
+        stream_fingerprints=seeds.public_ledger(),
+        created_at_utc=_deterministic_build_time(config),
+        record_counts=record_counts,
+        files=files,
+    )
+    manifest_bytes = _serialize_object(manifest.model_dump(mode="json"))
+
+    operational_root.mkdir(parents=True, exist_ok=False)
+    for name, content in payloads.items():
+        (operational_root / name).write_bytes(content)
+    manifest_path = operational_root / "fixture_manifest.json"
+    manifest_path.write_bytes(manifest_bytes)
+
+    tree_sha256 = _tree_hash(operational_root)
+    return FixtureBuildResult(
+        output_root=root,
+        operational_root=operational_root,
         manifest_path=manifest_path,
         tree_sha256=tree_sha256,
         record_counts=record_counts,

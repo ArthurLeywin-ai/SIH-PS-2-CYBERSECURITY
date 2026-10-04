@@ -114,7 +114,12 @@ class SubmissionManifestRecord(FixtureRecord):
 
 
 class FixtureManifest(FixtureRecord):
-    fixture_contract: Literal["SATSA-M1-FIXTURE-V1", "SATSA-M2-FIXTURE-V1"]
+    fixture_contract: Literal[
+        "SATSA-M1-FIXTURE-V1",
+        "SATSA-M2-FIXTURE-V1",
+        "SATSA-M3-FIXTURE-V1",
+        "SATSA-M4-FIXTURE-V1",
+    ]
     dataset_id: UUID
     dataset_version: str
     generator_version: str

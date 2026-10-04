@@ -90,9 +90,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
     fixture_parser.add_argument(
         "--milestone",
-        choices=["m1", "m2", "m3"],
+        choices=["m1", "m2", "m3", "m4"],
         default="m2",
-        help="Milestone fixture target (m1, m2, m3, default: m2).",
+        help="Milestone fixture target (m1, m2, m3, m4, default: m2).",
     )
     fixture_parser.add_argument(
         "--seed",
@@ -185,10 +185,15 @@ def cmd_build_fixture(args: argparse.Namespace) -> int:
             print("✓ M2 small development/base-world fixture built.")
         elif milestone == "m3":
             print("✓ M3 source profiles and canonical oracle generated.")
+        elif milestone == "m4":
+            print("✓ M4 scenario engine executed and private ground truth recorded.")
         print(f"  Operational root: {result.operational_root}")
         print(f"  Tree SHA-256: {result.tree_sha256}")
         print(f"  Records: {result.record_counts}")
-        print("  Ground truth: not generated (M2 base-world only)")
+        if milestone == "m4":
+            print(f"  Private ground truth: {result.output_root / 'private_ground_truth'}")
+        else:
+            print("  Ground truth: not generated (M2 base-world only)")
         return 0
     except Exception as exc:
         print(f"✗ Fixture build failed: {exc}", file=sys.stderr)

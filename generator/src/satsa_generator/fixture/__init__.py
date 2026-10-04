@@ -4,6 +4,8 @@ from satsa_generator.fixture.builder import (
     FixtureBuildResult,
     build_fixture,
     build_m2_fixture,
+    build_m3_fixture,
+    build_m4_fixture,
     validate_fixture_records,
     validate_m2_fixture_records,
 )
@@ -52,6 +54,8 @@ __all__ = [
     "SubmissionRecord",
     "build_fixture",
     "build_m2_fixture",
+    "build_m3_fixture",
+    "build_m4_fixture",
     "validate_fixture_records",
     "validate_m2_fixture_records",
 ]
