@@ -39,6 +39,8 @@ class FieldMapping(BaseModel):
     is_native_id: bool = False
     # Reference array support (e.g., case.alerts -> array of references)
     is_reference_array: bool = False
+    # Link object array support (e.g., case.alerts -> array of link objects)
+    is_link_object_array: bool = False
 
 
 TimestampFormat = Literal["iso_z", "iso_offset", "iso_offset_ms", "local_iana", "date_only"]

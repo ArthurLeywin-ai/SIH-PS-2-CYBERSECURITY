@@ -308,7 +308,7 @@ SRC_E_NAMES = {
         "case_type": "incident_type",
         "severity": "severity",
         "created_at_utc": "opened_at_utc",
-        "alerts": "linked_alert_ids",
+        "alerts": "alert_links",
     },
     "case_alert_link": {
         "case_alert_link_id": "link_id",
@@ -526,8 +526,10 @@ def generate_profile(prof_variant: str):
             if fam == "case" and f == "alerts":
                 if prof_variant in ("SRC-A", "SRC-B", "SRC-E-V1"):
                     args.append("is_present=False")
-                elif prof_variant in ("SRC-D", "SRC-E-V2"):
+                elif prof_variant == "SRC-D":
                     args.append("is_reference_array=True")
+                elif prof_variant == "SRC-E-V2":
+                    args.append("is_link_object_array=True")
 
             # Vocabulary mappings
             if f == "entity_criticality_band":

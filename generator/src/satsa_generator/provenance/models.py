@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -32,6 +33,7 @@ class FieldProvenance(BaseModel):
     source_field_name: str
     canonical_record_id: UUID
     canonical_field_name: str
+    raw_value: Any = None
 
 
 class RelationshipProvenance(BaseModel):

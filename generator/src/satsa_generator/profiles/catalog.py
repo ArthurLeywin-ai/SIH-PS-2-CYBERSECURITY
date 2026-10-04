@@ -985,7 +985,7 @@ def get_src_e_v2() -> ProfileDefinition:
                 "case_type": FieldMapping(source_name="incident_type"),
                 "severity": FieldMapping(source_name="severity", vocabulary=SEVERITY_SRC_E_V2),
                 "created_at_utc": FieldMapping(source_name="opened_at_utc"),
-                "alerts": FieldMapping(source_name="linked_alert_ids", is_reference_array=True),
+                "alerts": FieldMapping(source_name="alert_links", is_link_object_array=True),
             },
             "case_alert_link": {
                 "case_alert_link_id": FieldMapping(source_name="link_id", is_native_id=True),

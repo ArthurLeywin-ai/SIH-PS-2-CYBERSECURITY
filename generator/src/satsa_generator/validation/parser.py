@@ -264,34 +264,58 @@ def parse_and_validate(
                 raw_val = None
 
             if raw_val is not None:
-                if profile.id_namespace:
-                    if isinstance(raw_val, str) and (
-                        raw_val.startswith("[") or isinstance(expected_rel, list)
-                    ):
-                        with contextlib.suppress(Exception):
-                            raw_val = json.loads(raw_val)
+                if isinstance(raw_val, str) and (
+                    raw_val.startswith("[") or isinstance(expected_rel, list)
+                ):
+                    with contextlib.suppress(Exception):
+                        raw_val = json.loads(raw_val)
 
-                    if isinstance(raw_val, list):
-                        parsed_list = []
-                        for item in raw_val:
-                            item_str = str(item)
-                            if not item_str.startswith(f"{profile.id_namespace}-"):
-                                err_msg = (
-                                    f"Source ID '{item_str}' does not match "
-                                    f"expected profile namespace '{profile.id_namespace}'"
+                if isinstance(raw_val, list):
+                    parsed_list = []
+                    for item in raw_val:
+                        if fmap and getattr(fmap, "is_link_object_array", False):
+                            if not isinstance(item, dict):
+                                msg = (
+                                    f"Expected link object dictionary, got '{type(item)}' "
+                                    f"in {locator}"
                                 )
-                                raise ValueError(err_msg)
-                            parsed_list.append(str(UUID(item_str[-36:])))
-                        raw_val = parsed_list
-                    else:
-                        val_str = str(raw_val)
-                        if not val_str.startswith(f"{profile.id_namespace}-"):
+                                raise ValueError(msg)
+                            if not item.get("alert_id"):
+                                msg = (
+                                    f"Malformed link object missing 'alert_id' in {locator}: {item}"
+                                )
+                                raise ValueError(msg)
+                            if not item.get("link_type"):
+                                msg = (
+                                    f"Malformed link object missing 'link_type' "
+                                    f"in {locator}: {item}"
+                                )
+                                raise ValueError(msg)
+                            item_str = str(item["alert_id"])
+                        elif isinstance(item, dict):
+                            item_str = str(item.get("alert_id") or item.get("id", ""))
+                        else:
+                            item_str = str(item)
+
+                        if profile.id_namespace and not item_str.startswith(
+                            f"{profile.id_namespace}-"
+                        ):
                             err_msg = (
-                                f"Source ID '{val_str}' does not match "
+                                f"Source ID '{item_str}' does not match "
                                 f"expected profile namespace '{profile.id_namespace}'"
                             )
                             raise ValueError(err_msg)
-                        raw_val = str(UUID(val_str[-36:]))
+                        parsed_list.append(str(UUID(item_str[-36:])))
+                    raw_val = parsed_list
+                elif profile.id_namespace:
+                    val_str = str(raw_val)
+                    if not val_str.startswith(f"{profile.id_namespace}-"):
+                        err_msg = (
+                            f"Source ID '{val_str}' does not match "
+                            f"expected profile namespace '{profile.id_namespace}'"
+                        )
+                        raise ValueError(err_msg)
+                    raw_val = str(UUID(val_str[-36:]))
 
                 pfx = (
                     f"Parse-back rel failure / Parse-back relationship failure "

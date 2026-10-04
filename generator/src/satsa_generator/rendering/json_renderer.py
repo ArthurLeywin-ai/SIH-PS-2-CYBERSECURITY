@@ -54,15 +54,21 @@ class JSONRenderer(BaseRenderer):
             if not canonical_id:
                 canonical_id = UUID(int=idx)
 
+            family_map = context.profile.family_mappings.get(family, {})
+
             # Get relationships from operational records, NOT from oracle
             rels = self.get_relationships_for_record(canonical_id, family, context)
             for r_k, r_v in rels.items():
-                if isinstance(r_v, list):
+                fmap = family_map.get(r_k)
+                if fmap and fmap.is_link_object_array:
+                    record_dict[r_k] = self.get_link_objects_for_record(
+                        canonical_id, family, context
+                    )
+                elif isinstance(r_v, list):
                     record_dict[r_k] = [str(x) for x in r_v]
                 else:
                     record_dict[r_k] = str(r_v)
 
-            family_map = context.profile.family_mappings.get(family, {})
             fields_to_render = list(family_map.keys()) if family_map else list(record_dict.keys())
 
             for canonical_field in fields_to_render:
@@ -94,6 +100,7 @@ class JSONRenderer(BaseRenderer):
                             source_field_name=path[-1] if path else source_name,
                             canonical_record_id=canonical_id,
                             canonical_field_name=canonical_field,
+                            raw_value=source_value,
                         )
                     )
 

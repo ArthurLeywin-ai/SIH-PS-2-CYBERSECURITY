@@ -94,6 +94,44 @@ class BaseRenderer(abc.ABC):
                             val.append(target_id)
         return rels
 
+    def get_link_objects_for_record(
+        self,
+        canonical_id: UUID,
+        family: str,
+        context: RenderContext,
+    ) -> list[dict[str, Any]]:
+        """Derive structured link objects for a record from operational relationship records."""
+        if not context.relationship_records:
+            return []
+
+        subject_field = context.relationship_subject_field
+        target_field = context.relationship_target_field
+
+        if not subject_field or not target_field:
+            return []
+
+        link_objs: list[dict[str, Any]] = []
+        for rel_record in context.relationship_records:
+            rel_dict = rel_record.model_dump()
+            subject_id = rel_dict.get(subject_field)
+
+            if subject_id == canonical_id:
+                target_id = rel_dict.get(target_field)
+                if target_id:
+                    link_type = rel_dict.get("link_type", "RELATED")
+                    alert_id_formatted = (
+                        f"{context.profile.id_namespace}-ALERT-{target_id}"
+                        if context.profile.id_namespace
+                        else str(target_id)
+                    )
+                    link_objs.append(
+                        {
+                            "alert_id": alert_id_formatted,
+                            "link_type": str(link_type),
+                        }
+                    )
+        return link_objs
+
     def apply_field_mapping(
         self,
         canonical_field: str,
@@ -169,11 +207,14 @@ class BaseRenderer(abc.ABC):
             if isinstance(source_val, list):
                 new_list = []
                 for item in source_val:
-                    try:
-                        u = UUID(str(item))
-                        new_list.append(f"{context.profile.id_namespace}-ALERT-{u}")
-                    except (ValueError, TypeError):
+                    if isinstance(item, dict):
                         new_list.append(item)
+                    else:
+                        try:
+                            u = UUID(str(item))
+                            new_list.append(f"{context.profile.id_namespace}-ALERT-{u}")
+                        except (ValueError, TypeError):
+                            new_list.append(item)
                 source_val = new_list
             elif not canonical_field.startswith("source_") and (
                 canonical_field.endswith("_id") or (mapping and mapping.is_native_id)

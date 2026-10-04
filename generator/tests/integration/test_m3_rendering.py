@@ -545,7 +545,7 @@ def test_src_e_migration_boundary(
     - Vocabulary drift: canonical terms (HIGH, MALWARE, TRUE_POSITIVE) vs
       drifted codes (HI, MALW, TP)
     - Relationship: old foreign key (case_id in alert) vs new link object
-      (linked_alert_ids in case)
+      (alert_links in case)
     - Canonical reconciliation: both reconcile to the exact same canonical oracle.
     """
     from satsa_generator.config.models import load_config
@@ -724,8 +724,14 @@ def test_src_e_migration_boundary(
     assert any(s in ("HI", "MED", "LO", "CRIT") for s in v2_sevs)
 
     v2_case_rows = json.loads(v2_case_file.read_text(encoding="utf-8"))
-    assert "linked_alert_ids" in v2_case_rows[0], "V2 case has new link object array"
-    assert isinstance(v2_case_rows[0]["linked_alert_ids"], list)
+    assert "alert_links" in v2_case_rows[0], "V2 case has new link object array"
+    assert isinstance(v2_case_rows[0]["alert_links"], list)
+    for link_obj in v2_case_rows[0]["alert_links"]:
+        assert isinstance(link_obj, dict), "Every member must be an object/dict"
+        assert "alert_id" in link_obj, "Link object must contain alert_id"
+        assert "link_type" in link_obj, "Link object must contain link_type"
+        assert link_obj["alert_id"].startswith("E2-ALERT-")
+        assert link_obj["link_type"] in ("PRIMARY", "RELATED")
 
     # --- PROVE CANONICAL RECONCILIATION FOR BOTH PERIODS ---
     parse_and_validate(p01_root, p01_oracle_root, "SRC-E", "case", version="1.0")
@@ -939,3 +945,399 @@ def test_src_e_cross_version_rejection(
     # Attempting to validate V2 (JSON, E2- namespace) with V1 profile (CSV, E1- namespace) MUST fail
     with pytest.raises((ValueError, FileNotFoundError)):
         parse_and_validate(p02_root, p02_oracle, "SRC-E", "case", version="1.0")
+
+
+def test_src_e_v2_link_objects_contract(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Test A — SRC-E link objects contract.
+    Builds SRC-E, reads actual V2 case JSON from disk, and asserts:
+    - link field exists ('alert_links')
+    - it is a list
+    - every member is an object/dictionary
+    - each object contains the required relationship identifier ('alert_id')
+    - relationship type/link metadata is present ('link_type')
+    - no implementation path silently falls back to a list of strings
+    - parser rejects malformed/missing link-object members
+    - parses artifact and verifies canonical case -> alert relationships
+    - verifies V1 still uses old FK representation (alert.case_id in CSV)
+    """
+    import csv
+    import json
+    import shutil
+
+    from satsa_generator.config.models import load_config
+    from satsa_generator.fixture.builder import _generate_m2_records, validate_m2_fixture_records
+    from satsa_generator.ids.service import IDService
+    from satsa_generator.profiles.catalog import get_src_e_v1, get_src_e_v2
+    from satsa_generator.seeds.manager import SeedManager
+
+    config = load_config(fixture_config_path)
+    seeds = SeedManager(master_seed)
+    ids = IDService(config.dataset_namespace)
+    records = _generate_m2_records(config, seeds, ids)
+    validate_m2_fixture_records(*records)
+
+    cases, alerts, case_alert_links = records[9], records[8], records[10]
+
+    # Build canonical oracle
+    oracle = CanonicalOracle()
+    for rec in cases:
+        canonical_id = rec.case_id
+        alerts_for_case = [
+            link.alert_id for link in case_alert_links if link.case_id == canonical_id
+        ]
+        rels = {}
+        if alerts_for_case:
+            rels["alerts"] = alerts_for_case
+        oracle.register_expected_record(
+            CanonicalRecordState(
+                canonical_record_id=canonical_id,
+                canonical_family="case",
+                fields=rec.model_dump(mode="json"),
+                relationships=rels,
+            )
+        )
+    for rec in alerts:
+        canonical_id = rec.alert_id
+        rels = {}
+        for link in case_alert_links:
+            if link.alert_id == canonical_id:
+                rels["case_id"] = link.case_id
+                break
+        oracle.register_expected_record(
+            CanonicalRecordState(
+                canonical_record_id=canonical_id,
+                canonical_family="alert",
+                fields=rec.model_dump(mode="json"),
+                relationships=rels,
+            )
+        )
+
+    oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
+
+    # Render V1
+    v1_root = tmp_path / "v1_exports"
+    v1_oracle = tmp_path / "v1_oracle"
+    v1_oracle.mkdir(parents=True, exist_ok=True)
+    (v1_oracle / "src_e_oracle.json").write_text(
+        json.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    engine_v1 = RenderingEngine(v1_root, get_src_e_v1())
+    engine_v1.render_and_write(
+        "case",
+        cases,
+        relationship_records=case_alert_links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
+    engine_v1.render_and_write(
+        "alert",
+        alerts,
+        relationship_records=case_alert_links,
+        relationship_subject_field="alert_id",
+        relationship_object_field="alert_id",
+        relationship_target_field="case_id",
+    )
+    engine_v1.write_metadata(v1_oracle, "src_e")
+
+    # Render V2
+    v2_root = tmp_path / "v2_exports"
+    v2_oracle = tmp_path / "v2_oracle"
+    v2_oracle.mkdir(parents=True, exist_ok=True)
+    (v2_oracle / "src_e_oracle.json").write_text(
+        json.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    engine_v2 = RenderingEngine(v2_root, get_src_e_v2())
+    engine_v2.render_and_write(
+        "case",
+        cases,
+        relationship_records=case_alert_links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
+    engine_v2.render_and_write(
+        "alert",
+        alerts,
+        relationship_records=case_alert_links,
+        relationship_subject_field="alert_id",
+        relationship_object_field="alert_id",
+        relationship_target_field="case_id",
+    )
+    engine_v2.write_metadata(v2_oracle, "src_e")
+
+    # 1. Inspect actual V2 case JSON from disk
+    v2_case_path = v2_root / "case_src-e.json"
+    assert v2_case_path.exists(), "V2 case must exist on disk as JSON"
+    v2_cases = json.loads(v2_case_path.read_text(encoding="utf-8"))
+    assert len(v2_cases) > 0
+
+    cases_with_links = [c for c in v2_cases if c.get("alert_links")]
+    assert len(cases_with_links) > 0, "Must have cases with linked alerts"
+
+    for c in cases_with_links:
+        link_field = c["alert_links"]
+        # Must be a list
+        assert isinstance(link_field, list)
+        assert len(link_field) > 0
+        for item in link_field:
+            # Must be a dictionary object, NOT a string
+            assert isinstance(item, dict), f"Link item must be dict, got {type(item)}"
+            assert not isinstance(item, str), "Link item must not be a string"
+            # Must contain relationship identifier
+            assert "alert_id" in item, "Link object must contain 'alert_id'"
+            assert item["alert_id"].startswith("E2-ALERT-"), (
+                f"Wrong ID namespace: {item['alert_id']}"
+            )
+            # Must contain link metadata
+            assert "link_type" in item, "Link object must contain 'link_type'"
+            assert item["link_type"] in ("PRIMARY", "RELATED"), (
+                f"Invalid link_type: {item['link_type']}"
+            )
+
+    # Verify no string fallback anywhere in the artifact
+    for c in v2_cases:
+        if "alert_links" in c:
+            for item in c["alert_links"]:
+                assert not isinstance(item, str), "Fallback to list of strings is forbidden"
+
+    # 2. Verify V1 uses old FK representation
+    v1_alert_path = v1_root / "alert_src-e.csv"
+    with v1_alert_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        assert "case_id" in reader.fieldnames, "V1 alert must have direct FK case_id column"
+        assert "alert_id" in reader.fieldnames, "V1 alert must have legacy alert_id column"
+
+    v1_case_path = v1_root / "case_src-e.csv"
+    with v1_case_path.open("r", encoding="utf-8") as f:
+        case_reader = csv.DictReader(f)
+        assert "alert_links" not in case_reader.fieldnames, "V1 case must not have alert_links"
+        assert "alerts" not in case_reader.fieldnames, "V1 case must not have alerts column"
+
+    # 3. Parse and validate valid artifacts against canonical oracle
+    parse_and_validate(v2_root, v2_oracle, "SRC-E", "case", version="2.0")
+    parse_and_validate(v1_root, v1_oracle, "SRC-E", "case", version="1.0")
+
+    # 4. Verify parser rejects malformed/missing link-object members
+    # Case A: Fallback to list of strings
+    bad_root_strings = tmp_path / "bad_strings"
+    shutil.copytree(v2_root, bad_root_strings)
+    bad_cases = json.loads((bad_root_strings / "case_src-e.json").read_text(encoding="utf-8"))
+    for c in bad_cases:
+        if c.get("alert_links"):
+            c["alert_links"] = [link["alert_id"] for link in c["alert_links"]]  # flatten to strings
+            break
+    (bad_root_strings / "case_src-e.json").write_text(json.dumps(bad_cases), encoding="utf-8")
+    with pytest.raises(ValueError, match="Expected link object dictionary"):
+        parse_and_validate(bad_root_strings, v2_oracle, "SRC-E", "case", version="2.0")
+
+    # Case B: Missing alert_id
+    bad_root_noid = tmp_path / "bad_noid"
+    shutil.copytree(v2_root, bad_root_noid)
+    bad_cases_noid = json.loads((bad_root_noid / "case_src-e.json").read_text(encoding="utf-8"))
+    for c in bad_cases_noid:
+        if c.get("alert_links"):
+            c["alert_links"] = [{"link_type": "PRIMARY"}]  # missing alert_id
+            break
+    (bad_root_noid / "case_src-e.json").write_text(json.dumps(bad_cases_noid), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing 'alert_id'"):
+        parse_and_validate(bad_root_noid, v2_oracle, "SRC-E", "case", version="2.0")
+
+    # Case C: Missing link_type
+    bad_root_notype = tmp_path / "bad_notype"
+    shutil.copytree(v2_root, bad_root_notype)
+    bad_cases_notype = json.loads((bad_root_notype / "case_src-e.json").read_text(encoding="utf-8"))
+    for c in bad_cases_notype:
+        if c.get("alert_links"):
+            c["alert_links"] = [{"alert_id": c["alert_links"][0]["alert_id"]}]  # missing link_type
+            break
+    (bad_root_notype / "case_src-e.json").write_text(json.dumps(bad_cases_notype), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing 'link_type'"):
+        parse_and_validate(bad_root_notype, v2_oracle, "SRC-E", "case", version="2.0")
+
+
+def test_field_provenance_raw_rendered_values(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Test B — Raw field provenance contract.
+    Builds source artifacts, reads actual rendered source bytes/content,
+    loads generated field provenance, and proves:
+    - provenance.raw_value == actual rendered source value for:
+      * ordinary scalar field
+      * timestamp field
+      * vocabulary-mapped field
+      * ID field
+      * relationship/reference field (link object array in JSON, direct FK in CSV)
+    - Proves provenance is populated from the renderer's actual emitted source value,
+      NOT from the pre-render canonical oracle.
+    """
+    import csv
+    import json
+
+    from satsa_generator.config.models import load_config
+    from satsa_generator.fixture.builder import _generate_m2_records, validate_m2_fixture_records
+    from satsa_generator.ids.service import IDService
+    from satsa_generator.profiles.catalog import get_src_e_v1, get_src_e_v2
+    from satsa_generator.seeds.manager import SeedManager
+
+    config = load_config(fixture_config_path)
+    seeds = SeedManager(master_seed)
+    ids = IDService(config.dataset_namespace)
+    records = _generate_m2_records(config, seeds, ids)
+    validate_m2_fixture_records(*records)
+
+    cases, alerts, case_alert_links = records[9], records[8], records[10]
+
+    # --- Test B1: JSON format with structured link objects (SRC-E V2) ---
+    export_root_v2 = tmp_path / "exports_v2"
+    oracle_root_v2 = tmp_path / "oracle_v2"
+    oracle_root_v2.mkdir(parents=True, exist_ok=True)
+
+    profile_v2 = get_src_e_v2()
+    engine_v2 = RenderingEngine(export_root_v2, profile_v2)
+
+    engine_v2.render_and_write(
+        "case",
+        cases,
+        relationship_records=case_alert_links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
+    engine_v2.render_and_write(
+        "alert",
+        alerts,
+        relationship_records=case_alert_links,
+        relationship_subject_field="alert_id",
+        relationship_object_field="alert_id",
+        relationship_target_field="case_id",
+    )
+    engine_v2.write_metadata(oracle_root_v2, "src_e")
+
+    # Read actual rendered JSON file from disk
+    case_json_path = export_root_v2 / "case_src-e.json"
+    rendered_cases = json.loads(case_json_path.read_text(encoding="utf-8"))
+
+    # Read generated field provenance from disk
+    prov_path_v2 = oracle_root_v2 / "src_e_provenance.json"
+    assert prov_path_v2.exists(), "Provenance metadata file must exist on disk"
+    prov_data_v2 = json.loads(prov_path_v2.read_text(encoding="utf-8"))
+    field_prov_v2 = prov_data_v2["field_provenance"]
+
+    # Group provenance entries by canonical record ID
+    case0_id = str(cases[0].case_id)
+    case0_prov = {
+        p["canonical_field_name"]: p
+        for p in field_prov_v2
+        if p["source_file_path"] == "case_src-e.json" and p["canonical_record_id"] == case0_id
+    }
+
+    # 1. Test ordinary scalar field (case_type)
+    prov_type = case0_prov["case_type"]
+    assert "raw_value" in prov_type
+    assert prov_type["raw_value"] == rendered_cases[0]["incident_type"]
+    assert prov_type["source_field_name"] == "incident_type"
+    assert prov_type["source_file_path"] == "case_src-e.json"
+
+    # 2. Test timestamp field (created_at_utc rendered with offset ms)
+    prov_created = case0_prov["created_at_utc"]
+    assert prov_created["raw_value"] == rendered_cases[0]["opened_at_utc"]
+    assert "+00:00" in prov_created["raw_value"], (
+        "Timestamp raw value must reflect rendered offset format"
+    )
+
+    # 3. Test vocabulary-mapped field (severity in case: HIGH -> HI, MEDIUM -> MED, etc.)
+    prov_sev = case0_prov["severity"]
+    assert prov_sev["raw_value"] == rendered_cases[0]["severity"]
+    # In V2, severity is drifted code: HI / MED / LO / CRIT
+    assert prov_sev["raw_value"] in ("HI", "MED", "LO", "CRIT")
+    # Verify raw_value is NOT the unmapped canonical value (e.g. HIGH / MEDIUM / LOW / CRITICAL)
+    can_sev_val = (
+        cases[0].severity.value if hasattr(cases[0].severity, "value") else str(cases[0].severity)
+    )
+    if can_sev_val in ("HIGH", "MEDIUM", "LOW", "CRITICAL"):
+        assert prov_sev["raw_value"] != can_sev_val, (
+            "Field provenance raw_value must be emitted source code, not canonical value"
+        )
+
+    # 4. Test ID field (case_id mapped to case_id with E2-CASE- namespace prefix)
+    prov_id = case0_prov["case_id"]
+    assert prov_id["raw_value"] == rendered_cases[0]["case_id"]
+    assert prov_id["raw_value"].startswith("E2-CASE-")
+    # Must NOT be bare canonical UUID
+    assert prov_id["raw_value"] != str(cases[0].case_id), (
+        "Field provenance raw_value must be namespaced source ID, not bare canonical UUID"
+    )
+
+    # 5. Test relationship / link object field (alert_links)
+    linked_case = next(
+        c for c in cases if any(link.case_id == c.case_id for link in case_alert_links)
+    )
+    linked_case_id = str(linked_case.case_id)
+    linked_prov = {
+        p["canonical_field_name"]: p
+        for p in field_prov_v2
+        if p["source_file_path"] == "case_src-e.json" and p["canonical_record_id"] == linked_case_id
+    }
+    rendered_linked_case = next(
+        c for c in rendered_cases if c["case_id"] == f"E2-CASE-{linked_case.case_id}"
+    )
+
+    prov_links = linked_prov["alerts"]
+    assert prov_links["raw_value"] == rendered_linked_case["alert_links"]
+    assert isinstance(prov_links["raw_value"], list)
+    assert len(prov_links["raw_value"]) > 0
+    assert isinstance(prov_links["raw_value"][0], dict)
+    assert "alert_id" in prov_links["raw_value"][0]
+    assert "link_type" in prov_links["raw_value"][0]
+    assert prov_links["source_field_name"] == "alert_links"
+
+    # --- Test B2: CSV format with lexical scalar / FK representation (SRC-E V1) ---
+    export_root_v1 = tmp_path / "exports_v1"
+    oracle_root_v1 = tmp_path / "oracle_v1"
+    oracle_root_v1.mkdir(parents=True, exist_ok=True)
+
+    profile_v1 = get_src_e_v1()
+    engine_v1 = RenderingEngine(export_root_v1, profile_v1)
+    engine_v1.render_and_write(
+        "alert",
+        alerts,
+        relationship_records=case_alert_links,
+        relationship_subject_field="alert_id",
+        relationship_object_field="alert_id",
+        relationship_target_field="case_id",
+    )
+    engine_v1.write_metadata(oracle_root_v1, "src_e")
+
+    # Read actual rendered CSV file from disk
+    alert_csv_path = export_root_v1 / "alert_src-e.csv"
+    with alert_csv_path.open("r", encoding="utf-8") as f:
+        csv_rows = list(csv.DictReader(f))
+
+    prov_path_v1 = oracle_root_v1 / "src_e_provenance.json"
+    prov_data_v1 = json.loads(prov_path_v1.read_text(encoding="utf-8"))
+    alert_prov_v1 = prov_data_v1["field_provenance"]
+
+    alert0_id = str(alerts[0].alert_id)
+    alert0_prov = {
+        p["canonical_field_name"]: p
+        for p in alert_prov_v1
+        if p["source_file_path"] == "alert_src-e.csv" and p["canonical_record_id"] == alert0_id
+    }
+
+    # Scalar / ID field in CSV
+    prov_alert_id = alert0_prov["alert_id"]
+    assert prov_alert_id["raw_value"] == csv_rows[0]["alert_id"]
+    assert prov_alert_id["raw_value"].startswith("E1-ALERT-")
+
+    # Timestamp field in CSV
+    prov_alert_ts = alert0_prov["created_at_utc"]
+    assert prov_alert_ts["raw_value"] == csv_rows[0]["created_at_utc"]
+    assert prov_alert_ts["raw_value"].endswith("Z")
+
+    # Foreign key relationship in CSV
+    prov_case_fk = alert0_prov["case_id"]
+    assert prov_case_fk["raw_value"] == csv_rows[0]["case_id"]
+    assert prov_case_fk["raw_value"].startswith("E1-CASE-")

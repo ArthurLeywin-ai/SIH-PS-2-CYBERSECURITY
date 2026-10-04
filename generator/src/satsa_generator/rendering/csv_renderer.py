@@ -79,6 +79,7 @@ class CSVRenderer(BaseRenderer):
 
                     source_row[source_name] = source_value
 
+                    raw_val_str = "" if source_value is None else str(source_value)
                     context.field_provenance.append(
                         FieldProvenance(
                             source_file_path=context.output_path,
@@ -86,6 +87,7 @@ class CSVRenderer(BaseRenderer):
                             source_field_name=source_name,
                             canonical_record_id=canonical_id,
                             canonical_field_name=canonical_field,
+                            raw_value=raw_val_str,
                         )
                     )
 

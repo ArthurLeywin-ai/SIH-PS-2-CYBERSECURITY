@@ -151,14 +151,30 @@ def reconstruct_family_from_disk(
                 if isinstance(raw_val, list):
                     parsed_list = []
                     for item in raw_val:
-                        item_str = str(item)
-                        if not item_str.startswith(f"{profile.id_namespace}-"):
-                            err_msg = (
-                                f"Source ID '{item_str}' does not match "
-                                f"expected profile namespace '{profile.id_namespace}'"
-                            )
-                            raise ValueError(err_msg)
-                        parsed_list.append(item_str[-36:])
+                        if isinstance(item, dict):
+                            alert_id_val = item.get("alert_id") or item.get("id")
+                            if not alert_id_val:
+                                err_msg = (
+                                    f"Malformed link object missing alert_id in {locator}: {item}"
+                                )
+                                raise ValueError(err_msg)
+                            item_str = str(alert_id_val)
+                            if not item_str.startswith(f"{profile.id_namespace}-"):
+                                err_msg = (
+                                    f"Source ID '{item_str}' does not match "
+                                    f"expected profile namespace '{profile.id_namespace}'"
+                                )
+                                raise ValueError(err_msg)
+                            parsed_list.append(item_str[-36:])
+                        else:
+                            item_str = str(item)
+                            if not item_str.startswith(f"{profile.id_namespace}-"):
+                                err_msg = (
+                                    f"Source ID '{item_str}' does not match "
+                                    f"expected profile namespace '{profile.id_namespace}'"
+                                )
+                                raise ValueError(err_msg)
+                            parsed_list.append(item_str[-36:])
                     raw_val = parsed_list
                 elif not can_field.startswith("source_") and (
                     can_field.endswith("_id") or fmap.is_native_id
@@ -203,13 +219,33 @@ def reconstruct_family_from_disk(
             fields[can_field] = raw_val
 
             # Relationship extraction from source representation
-            if fmap.is_reference_array or can_field == "alerts":
+            if fmap.is_reference_array or fmap.is_link_object_array or can_field == "alerts":
                 if raw_val is not None:
                     if isinstance(raw_val, str):
                         with contextlib.suppress(Exception):
                             raw_val = json.loads(raw_val)
                     if isinstance(raw_val, list):
-                        ref_ids = [UUID(str(x)[-36:]) for x in raw_val]
+                        ref_ids = []
+                        for x in raw_val:
+                            if isinstance(x, dict):
+                                alert_id_val = x.get("alert_id") or x.get("id")
+                                if not alert_id_val:
+                                    err_msg = (
+                                        f"Malformed link object missing alert_id in {locator}: {x}"
+                                    )
+                                    raise ValueError(err_msg)
+                                alert_id_str = str(alert_id_val)
+                                if profile.id_namespace and not alert_id_str.startswith(
+                                    f"{profile.id_namespace}-"
+                                ):
+                                    err_msg = (
+                                        f"Source ID '{alert_id_str}' in link object does not "
+                                        f"match expected profile namespace '{profile.id_namespace}'"
+                                    )
+                                    raise ValueError(err_msg)
+                                ref_ids.append(UUID(alert_id_str[-36:]))
+                            else:
+                                ref_ids.append(UUID(str(x)[-36:]))
                         relationships["alerts"] = ref_ids
                         rel_provenance_list.append(
                             RelationshipProvenance(
