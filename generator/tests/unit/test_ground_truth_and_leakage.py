@@ -16,7 +16,7 @@ from satsa_generator.scenarios.models import (
     RealizationState,
     TruthRecordRole,
 )
-from satsa_generator.scenarios.mutators import ScenarioMutator
+from satsa_generator.scenarios.mutators import ScenarioMutator, plan_authorizations
 from satsa_generator.scenarios.selectors import ScenarioSelector
 from satsa_generator.scenarios.truth import (
     GroundTruthWriter,
@@ -32,6 +32,7 @@ type TruthSetup = tuple[
     LegitimateControlEngine,
     ScenarioValidator,
     GroundTruthWriter,
+    AuthorizationLedger,
 ]
 
 
@@ -45,7 +46,7 @@ def truth_setup(master_seed: bytes) -> TruthSetup:
     controls = LegitimateControlEngine(ids, seeds)
     validator = ScenarioValidator(ledger)
     truth_writer = GroundTruthWriter(ids)
-    return selector, mutator, controls, validator, truth_writer
+    return selector, mutator, controls, validator, truth_writer, ledger
 
 
 def test_ground_truth_record_creation(
@@ -54,11 +55,14 @@ def test_ground_truth_record_creation(
     tmp_path: Path,
 ) -> None:
     """GroundTruthRecord captures full private provenance and serializes to disk."""
-    selector, mutator, _, validator, truth_writer = truth_setup
+    selector, mutator, _, validator, truth_writer, ledger = truth_setup
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("EXEC-GAP-001")
     plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
+
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
 
     mutated_records, receipts = mutator.mutate(defn, plan, base_m2_records)
     report = validator.validate(plan, mutated_records, receipts, fail_loudly=True)
@@ -85,13 +89,15 @@ def test_classification_mapping_for_all_realizations(
     base_m2_records: dict[str, list[Any]],
 ) -> None:
     """Verify classifications: CONCERNING->ATTENTION, LEGITIMATE_UNUSUAL, etc."""
-    selector, mutator, controls, validator, truth_writer = truth_setup
+    selector, mutator, controls, validator, truth_writer, ledger = truth_setup
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("NEG-SPACE-001")
 
     # CONCERNING
     plan_c = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
+    for auth in plan_authorizations(plan_c):
+        ledger.authorize(auth)
     mut_c, rec_c = mutator.mutate(defn, plan_c, base_m2_records)
     rep_c = validator.validate(plan_c, mut_c, rec_c)
     gt_c = truth_writer.build_and_record(plan_c, rec_c, rep_c)
@@ -107,6 +113,8 @@ def test_classification_mapping_for_all_realizations(
         control_context_type=ControlContextType.MAINTENANCE_WINDOW,
     )
     decl_l, upd_l = controls.declare_control(plan_l, base_m2_records, is_complete=True)
+    for auth in plan_authorizations(plan_l):
+        ledger.authorize(auth)
     mut_l, rec_l = mutator.mutate(defn, plan_l, upd_l)
     rep_l = validator.validate(plan_l, mut_l, rec_l)
     gt_l = truth_writer.build_and_record(plan_l, rec_l, rep_l, control_declaration=decl_l)
@@ -114,6 +122,8 @@ def test_classification_mapping_for_all_realizations(
 
     # AMBIGUOUS
     plan_a = selector.select(defn, RealizationState.AMBIGUOUS, base_m2_records, org_id, "P01")
+    for auth in plan_authorizations(plan_a):
+        ledger.authorize(auth)
     mut_a, rec_a = mutator.mutate(defn, plan_a, base_m2_records)
     rep_a = validator.validate(plan_a, mut_a, rec_a)
     gt_a = truth_writer.build_and_record(plan_a, rec_a, rep_a)
@@ -122,6 +132,8 @@ def test_classification_mapping_for_all_realizations(
 
     # NORMAL
     plan_n = selector.select(defn, RealizationState.NORMAL, base_m2_records, org_id, "P01")
+    for auth in plan_authorizations(plan_n):
+        ledger.authorize(auth)
     mut_n, rec_n = mutator.mutate(defn, plan_n, base_m2_records)
     rep_n = validator.validate(plan_n, mut_n, rec_n)
     gt_n = truth_writer.build_and_record(plan_n, rec_n, rep_n)

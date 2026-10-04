@@ -114,11 +114,11 @@ def test_inapplicable_realization_fails(
     base_m2_records: dict[str, list[Any]],
 ) -> None:
     """Selecting an inapplicable realization state raises SelectionError."""
-    defn = get_scenario("HIST-REP-001")  # Does not support AMBIGUOUS
+    defn = get_scenario("LEGIT-CTRL-001")  # Does not support CONCERNING
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     with pytest.raises(SelectionError, match="not applicable"):
-        selector.select(defn, RealizationState.AMBIGUOUS, base_m2_records, org_id, "P01")
+        selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
 
 
 def test_infeasible_selection_fails_loudly(

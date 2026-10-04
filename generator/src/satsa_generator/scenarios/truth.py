@@ -166,6 +166,19 @@ class GroundTruthWriter:
             abstention_state=abstention_state,
             control_context_type=plan.control_context_type,
             control_context_description=plan.control_context_description,
+            control_process_ref_id=(
+                control_declaration.control_process_ref_id
+                if control_declaration and control_declaration.control_process_ref_id
+                else plan.control_process_ref_id
+            ),
+            control_process_link_id=(
+                control_declaration.control_process_link_id
+                if control_declaration and control_declaration.control_process_link_id
+                else plan.control_process_link_id
+            ),
+            control_declaration_id=(
+                control_declaration.control_declaration_id if control_declaration else None
+            ),
             evidence_families_touched=definition.evidence_families_touched,
             validator_result="PASSED" if report.passed else "FAILED",
         )

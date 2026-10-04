@@ -167,22 +167,18 @@ def _build_catalog() -> dict[str, ScenarioDefinition]:
             applicable_realizations=[
                 RealizationState.CONCERNING,
                 RealizationState.LEGITIMATE_UNUSUAL,
+                RealizationState.AMBIGUOUS,
                 RealizationState.NORMAL,
             ],
             evidence_families_touched=["case", "alert", "closure"],
             requires_multiple_records=True,
-            supports_ambiguity=False,
+            supports_ambiguity=True,
             legitimate_control_requirements=[
                 ControlContextType.APPROVED_SUPPRESSION,
                 ControlContextType.VALID_PROCESS_CHANGE,
             ],
             expected_relationship_impact=["alert→case→closure"],
-            inapplicable_realization_reasons={
-                "AMBIGUOUS": (
-                    "Repetition is objectively observable from record counts; "
-                    "ambiguity does not meaningfully apply to the pattern itself."
-                ),
-            },
+            inapplicable_realization_reasons={},
         ),
         # ---------------------------------------------------------------
         # D. Peer-comparison scenarios
@@ -282,6 +278,7 @@ def _build_catalog() -> dict[str, ScenarioDefinition]:
             ],
             applicable_realizations=[
                 RealizationState.LEGITIMATE_UNUSUAL,
+                RealizationState.AMBIGUOUS,
                 RealizationState.NORMAL,
             ],
             evidence_families_touched=[
@@ -290,7 +287,7 @@ def _build_catalog() -> dict[str, ScenarioDefinition]:
                 "process_change",
             ],
             requires_multiple_records=True,
-            supports_ambiguity=False,
+            supports_ambiguity=True,
             legitimate_control_requirements=[
                 ControlContextType.LEGITIMATE_BURST,
                 ControlContextType.MAINTENANCE_WINDOW,
@@ -299,12 +296,9 @@ def _build_catalog() -> dict[str, ScenarioDefinition]:
             expected_relationship_impact=[],
             inapplicable_realization_reasons={
                 "CONCERNING": (
-                    "This scenario specifically models legitimate cases; "
-                    "a concerning variant belongs to the execution-gap family."
-                ),
-                "AMBIGUOUS": (
-                    "The control context is deliberately complete; "
-                    "ambiguous variants belong to the ambiguous family."
+                    "This scenario specifically models legitimate and baseline operational "
+                    "conditions; concerning defect variants belong to the execution-gap "
+                    "or negative-space families."
                 ),
             },
         ),

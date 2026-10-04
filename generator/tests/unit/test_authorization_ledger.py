@@ -160,3 +160,99 @@ def test_export_private() -> None:
     assert len(exported) == 2
     assert exported[0]["authorization_id"] == "auth-1"
     assert exported[1]["authorization_id"] == "auth-2"
+
+
+def test_verify_authorization_success() -> None:
+    """Verifying a matching planned authorization succeeds and returns entry."""
+    ledger = AuthorizationLedger()
+    entry = _make_entry(auth_id="auth-valid", target_ids=("target-1",))
+    ledger.authorize(entry)
+
+    verified = ledger.verify_authorization(
+        authorization_id="auth-valid",
+        expected_scenario_id="EXEC-GAP-001",
+        expected_mutation_type=MutationType.REMOVE_RECORD,
+        target_record_ids=("target-1",),
+        target_family="investigation",
+    )
+    assert verified.authorization_id == "auth-valid"
+
+
+def test_verify_authorization_unplanned_fails() -> None:
+    """Verifying an authorization that was never planned raises AuthorizationError."""
+    ledger = AuthorizationLedger()
+
+    with pytest.raises(AuthorizationError, match="Unauthorized mutation"):
+        ledger.verify_authorization(
+            authorization_id="unplanned-auth",
+            expected_scenario_id="EXEC-GAP-001",
+            expected_mutation_type=MutationType.REMOVE_RECORD,
+            target_record_ids=("target-1",),
+            target_family="investigation",
+        )
+
+
+def test_verify_authorization_wrong_target_fails() -> None:
+    """Verifying with mismatched target record IDs raises AuthorizationError."""
+    ledger = AuthorizationLedger()
+    entry = _make_entry(auth_id="auth-1", target_ids=("target-1",))
+    ledger.authorize(entry)
+
+    with pytest.raises(AuthorizationError, match="target record mismatch"):
+        ledger.verify_authorization(
+            authorization_id="auth-1",
+            expected_scenario_id="EXEC-GAP-001",
+            expected_mutation_type=MutationType.REMOVE_RECORD,
+            target_record_ids=("wrong-target",),
+            target_family="investigation",
+        )
+
+
+def test_verify_authorization_wrong_mutation_type_fails() -> None:
+    """Verifying with mismatched mutation type raises AuthorizationError."""
+    ledger = AuthorizationLedger()
+    entry = _make_entry(auth_id="auth-1", mutation_type=MutationType.REMOVE_RECORD)
+    ledger.authorize(entry)
+
+    with pytest.raises(AuthorizationError, match="mutation type mismatch"):
+        ledger.verify_authorization(
+            authorization_id="auth-1",
+            expected_scenario_id="EXEC-GAP-001",
+            expected_mutation_type=MutationType.ALTER_FIELD,
+            target_record_ids=("case-001",),
+            target_family="investigation",
+        )
+
+
+def test_verify_authorization_wrong_scenario_fails() -> None:
+    """Verifying with mismatched scenario ID raises AuthorizationError."""
+    ledger = AuthorizationLedger()
+    entry = _make_entry(auth_id="auth-1", scenario_id="EXEC-GAP-001")
+    ledger.authorize(entry)
+
+    with pytest.raises(AuthorizationError, match="scenario mismatch"):
+        ledger.verify_authorization(
+            authorization_id="auth-1",
+            expected_scenario_id="NEG-SPACE-001",
+            expected_mutation_type=MutationType.REMOVE_RECORD,
+            target_record_ids=("case-001",),
+            target_family="investigation",
+        )
+
+
+def test_verify_authorization_already_applied_fails() -> None:
+    """Verifying an authorization that has already been consumed raises AuthorizationError."""
+    ledger = AuthorizationLedger()
+    entry = _make_entry(auth_id="auth-1")
+    ledger.authorize(entry)
+    receipt = _make_receipt(auth_id="auth-1")
+    ledger.consume(receipt)
+
+    with pytest.raises(AuthorizationError, match="cannot be consumed"):
+        ledger.verify_authorization(
+            authorization_id="auth-1",
+            expected_scenario_id="EXEC-GAP-001",
+            expected_mutation_type=MutationType.REMOVE_RECORD,
+            target_record_ids=("case-001",),
+            target_family="investigation",
+        )

@@ -84,14 +84,23 @@ def test_realization_state_support() -> None:
     assert RealizationState.AMBIGUOUS in exec_001.applicable_realizations
     assert RealizationState.NORMAL in exec_001.applicable_realizations
 
-    # LEGIT-CTRL-001 only supports LEGITIMATE_UNUSUAL and NORMAL
+    # LEGIT-CTRL-001 supports LEGITIMATE_UNUSUAL, AMBIGUOUS, and NORMAL
     legit_001 = catalog["LEGIT-CTRL-001"]
     assert legit_001.applicable_realizations == [
         RealizationState.LEGITIMATE_UNUSUAL,
+        RealizationState.AMBIGUOUS,
         RealizationState.NORMAL,
     ]
     assert "CONCERNING" in legit_001.inapplicable_realization_reasons
-    assert "AMBIGUOUS" in legit_001.inapplicable_realization_reasons
+
+    # AMBIG-001 supports AMBIGUOUS and NORMAL
+    ambig_001 = catalog["AMBIG-001"]
+    assert ambig_001.applicable_realizations == [
+        RealizationState.AMBIGUOUS,
+        RealizationState.NORMAL,
+    ]
+    assert "CONCERNING" in ambig_001.inapplicable_realization_reasons
+    assert "LEGITIMATE_UNUSUAL" in ambig_001.inapplicable_realization_reasons
 
 
 def test_legitimate_control_requirements() -> None:

@@ -176,6 +176,8 @@ class ScenarioPlan:
     seed_label: str
     control_context_type: ControlContextType | None = None
     control_context_description: str | None = None
+    control_process_ref_id: str | None = None
+    control_process_link_id: str | None = None
     correlation_group_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -280,6 +282,9 @@ class GroundTruthRecord(BaseModel):
     )
     control_context_type: ControlContextType | None = None
     control_context_description: str | None = None
+    control_process_ref_id: str | None = None
+    control_process_link_id: str | None = None
+    control_declaration_id: str | None = None
     evidence_families_touched: list[str] = Field(default_factory=list)
     validator_result: str = Field(default="PENDING", max_length=64)
 
@@ -309,6 +314,8 @@ class LegitimateControlDeclaration(BaseModel):
     )
     effective_start_utc: str = Field(max_length=64)
     effective_end_utc: str | None = Field(default=None, max_length=64)
+    control_process_ref_id: str | None = Field(default=None, max_length=128)
+    control_process_link_id: str | None = Field(default=None, max_length=128)
     is_complete: bool = Field(
         default=True,
         description="False if control evidence is intentionally incomplete (ambiguous)",

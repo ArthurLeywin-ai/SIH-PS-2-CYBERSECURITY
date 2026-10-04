@@ -15,7 +15,7 @@ from satsa_generator.scenarios.models import (
     ControlContextType,
     RealizationState,
 )
-from satsa_generator.scenarios.mutators import ScenarioMutator
+from satsa_generator.scenarios.mutators import ScenarioMutator, plan_authorizations
 from satsa_generator.scenarios.selectors import ScenarioSelector
 from satsa_generator.scenarios.validators import (
     ScenarioValidationError,
@@ -55,6 +55,9 @@ def test_validator_read_only_and_success(
     defn = get_scenario("EXEC-GAP-001")
     plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
 
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
+
     mutated_records, receipts = mutator.mutate(defn, plan, base_m2_records)
     inv_count_before = len(mutated_records["investigation"])
 
@@ -83,6 +86,9 @@ def test_validator_fails_loudly_when_condition_unmet(
     defn = get_scenario("EXEC-GAP-001")
     plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
 
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
+
     # Intentionally validate against unmutated records where investigations still exist!
     _, receipts = mutator.mutate(defn, plan, base_m2_records)
 
@@ -98,7 +104,7 @@ def test_validator_legitimate_control_verification(
     base_m2_records: dict[str, list[Any]],
 ) -> None:
     """Validator confirms legitimate control context presence for LEGITIMATE_UNUSUAL."""
-    selector, mutator, controls, validator, _ = validator_suite
+    selector, mutator, controls, validator, ledger = validator_suite
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("NEG-SPACE-001")
@@ -113,6 +119,10 @@ def test_validator_legitimate_control_verification(
     )
 
     _, updated_records = controls.declare_control(plan, base_m2_records, is_complete=True)
+
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
+
     mutated_records, receipts = mutator.mutate(defn, plan, updated_records)
 
     report = validator.validate(plan, mutated_records, receipts, fail_loudly=True)
@@ -126,11 +136,14 @@ def test_validator_ambiguous_verification(
     base_m2_records: dict[str, list[Any]],
 ) -> None:
     """Validator confirms ambiguous state for AMBIG-001."""
-    selector, mutator, _, validator, _ = validator_suite
+    selector, mutator, _, validator, ledger = validator_suite
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("AMBIG-001")
     plan = selector.select(defn, RealizationState.AMBIGUOUS, base_m2_records, org_id, "P01")
+
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
 
     mutated_records, receipts = mutator.mutate(defn, plan, base_m2_records)
     report = validator.validate(plan, mutated_records, receipts, fail_loudly=True)

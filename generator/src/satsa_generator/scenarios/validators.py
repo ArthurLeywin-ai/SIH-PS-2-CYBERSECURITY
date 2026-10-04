@@ -340,6 +340,8 @@ def _validate_hist_rep_001(
                 )
             else:
                 errors.append("LEGITIMATE_UNUSUAL requires control context")
+    elif plan.realization == RealizationState.AMBIGUOUS:
+        checks.append("Ambiguous historical baseline / recurrence pattern verified")
     elif plan.realization == RealizationState.NORMAL:
         checks.append(f"Normal varied dispositions verified: {dispositions}")
 
@@ -431,6 +433,8 @@ def _validate_legit_ctrl_001(
             checks.append(f"Legitimate control context confirmed: {plan.control_context_type}")
         else:
             errors.append("LEGIT-CTRL-001 requires control context")
+    elif plan.realization == RealizationState.AMBIGUOUS:
+        checks.append("Ambiguous alert burst / draft control context verified")
     elif plan.realization == RealizationState.NORMAL:
         checks.append("Normal alert volume verified")
 

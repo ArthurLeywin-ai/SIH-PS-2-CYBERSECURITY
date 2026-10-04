@@ -8,13 +8,13 @@ import pytest
 
 from satsa_generator.ids.service import IDService
 from satsa_generator.scenarios.catalog import get_scenario
-from satsa_generator.scenarios.ledger import AuthorizationLedger
+from satsa_generator.scenarios.ledger import AuthorizationError, AuthorizationLedger
 from satsa_generator.scenarios.models import (
     ControlContextType,
     MutationType,
     RealizationState,
 )
-from satsa_generator.scenarios.mutators import ScenarioMutator
+from satsa_generator.scenarios.mutators import ScenarioMutator, plan_authorizations
 from satsa_generator.scenarios.selectors import ScenarioSelector
 from satsa_generator.seeds.manager import SeedManager
 
@@ -36,11 +36,15 @@ def test_copy_on_write_preserves_original(
     base_m2_records: dict[str, list[Any]],
 ) -> None:
     """Mutator must not modify original records in-place (copy-on-write)."""
-    selector, mutator, _ = mutator_setup
+    selector, mutator, ledger = mutator_setup
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("EXEC-GAP-001")
     plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
+
+    # Pre-authorize plan before mutator execution
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
 
     orig_inv_count = len(base_m2_records["investigation"])
     mutated_records, receipts = mutator.mutate(defn, plan, base_m2_records)
@@ -57,14 +61,21 @@ def test_mutation_receipt_and_ledger_consumption(
     mutator_setup: tuple[ScenarioSelector, ScenarioMutator, AuthorizationLedger],
     base_m2_records: dict[str, list[Any]],
 ) -> None:
-    """Each mutation registers an authorization entry and consumes it via receipt."""
+    """Each mutation verifies an existing authorization entry and consumes it via receipt."""
     selector, mutator, ledger = mutator_setup
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("NEG-SPACE-001")
     plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
 
-    assert ledger.size == 0
+    # Pre-authorize
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
+
+    assert ledger.size == 1
+    auth_entry = list(ledger.entries.values())[0]
+    assert auth_entry.status.value == "PLANNED"
+
     _, receipts = mutator.mutate(defn, plan, base_m2_records)
 
     assert ledger.size == 1
@@ -75,16 +86,37 @@ def test_mutation_receipt_and_ledger_consumption(
     assert ledger.entries[auth_id].status.value == "APPLIED"
 
 
+def test_unplanned_mutation_fails_loudly(
+    mutator_setup: tuple[ScenarioSelector, ScenarioMutator, AuthorizationLedger],
+    base_m2_records: dict[str, list[Any]],
+) -> None:
+    """Calling mutator without pre-authorization fails loudly and preserves records."""
+    selector, mutator, _ = mutator_setup
+    org_id = str(base_m2_records["organization"][0].organization_id)
+    defn = get_scenario("EXEC-GAP-001")
+    plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
+
+    orig_inv_count = len(base_m2_records["investigation"])
+    with pytest.raises(AuthorizationError, match="Unauthorized mutation"):
+        mutator.mutate(defn, plan, base_m2_records)
+
+    # Operational data is completely untouched
+    assert len(base_m2_records["investigation"]) == orig_inv_count
+
+
 def test_unrelated_records_preserved(
     mutator_setup: tuple[ScenarioSelector, ScenarioMutator, AuthorizationLedger],
     base_m2_records: dict[str, list[Any]],
 ) -> None:
     """Mutations must preserve all unrelated records and evidence families."""
-    selector, mutator, _ = mutator_setup
+    selector, mutator, ledger = mutator_setup
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     defn = get_scenario("EXEC-GAP-001")
     plan = selector.select(defn, RealizationState.CONCERNING, base_m2_records, org_id, "P01")
+
+    for auth in plan_authorizations(plan):
+        ledger.authorize(auth)
 
     mutated_records, _ = mutator.mutate(defn, plan, base_m2_records)
 
@@ -98,8 +130,8 @@ def test_all_scenarios_mutate_cleanly(
     mutator_setup: tuple[ScenarioSelector, ScenarioMutator, AuthorizationLedger],
     base_m2_records: dict[str, list[Any]],
 ) -> None:
-    """All 8 scenarios can be mutated across applicable realization states."""
-    selector, mutator, _ = mutator_setup
+    """All 9 scenarios can be mutated across applicable realization states."""
+    selector, mutator, ledger = mutator_setup
     org_id = str(base_m2_records["organization"][0].organization_id)
 
     test_cases = [
@@ -115,6 +147,7 @@ def test_all_scenarios_mutate_cleanly(
         ("NEG-SPACE-001", RealizationState.AMBIGUOUS, None),
         ("NEG-SPACE-002", RealizationState.CONCERNING, None),
         ("HIST-REP-001", RealizationState.CONCERNING, None),
+        ("HIST-REP-001", RealizationState.AMBIGUOUS, None),
         ("PEER-CMP-001", RealizationState.CONCERNING, None),
         ("CROSS-REC-001", RealizationState.CONCERNING, None),
         (
@@ -135,6 +168,10 @@ def test_all_scenarios_mutate_cleanly(
             "P01",
             control_context_type=ctrl_type,
         )
+        for auth in plan_authorizations(plan):
+            if auth.authorization_id not in ledger.entries:
+                ledger.authorize(auth)
+
         mutated, receipts = mutator.mutate(defn, plan, base_m2_records)
         assert len(receipts) >= 1
         assert all(r.applied for r in receipts)

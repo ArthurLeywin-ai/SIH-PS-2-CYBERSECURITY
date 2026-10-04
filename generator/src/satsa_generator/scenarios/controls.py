@@ -18,7 +18,9 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from satsa_generator.core.errors import GeneratorError
 from satsa_generator.fixture.models import (
+    ControlProcessSubjectLinkRecord,
     ExceptionRecord,
     ProcessChangeRecord,
 )
@@ -28,7 +30,13 @@ from satsa_generator.scenarios.models import (
     LegitimateControlDeclaration,
     ScenarioPlan,
 )
+from satsa_generator.scenarios.selectors import select_m2_control_reference
 from satsa_generator.seeds.manager import SeedManager
+
+
+class LegitimateControlError(GeneratorError):
+    """Raised when legitimate control requirements or references are invalid."""
+
 
 # Mapping of ControlContextType to ExceptionRecord exception_type
 _CONTROL_TO_EXCEPTION_TYPE: dict[ControlContextType, str] = {
@@ -99,6 +107,31 @@ class LegitimateControlEngine:
             except ValueError:
                 first_target_id = None
 
+        # Authoritative M2 control reference selection
+        ctrl_refs = records.get("control_process_reference", [])
+        if not ctrl_refs:
+            raise LegitimateControlError(
+                "No control_process_reference records found in operational evidence"
+            )
+
+        ref = None
+        if plan.control_process_ref_id:
+            for r in ctrl_refs:
+                if (
+                    str(r.control_process_ref_id) == plan.control_process_ref_id
+                    or r.reference_code == plan.control_process_ref_id
+                ):
+                    ref = r
+                    break
+            if ref is None:
+                raise LegitimateControlError(
+                    f"Control reference '{plan.control_process_ref_id}' "
+                    "not found in operational evidence",
+                    context={"control_process_ref_id": plan.control_process_ref_id},
+                )
+        else:
+            ref = select_m2_control_reference(plan.scenario_id, target_family, ctrl_refs)
+
         exception_type_str = _CONTROL_TO_EXCEPTION_TYPE.get(control_type, "KNOWN_EXCEPTION")
 
         # Stable timestamps within typical period range
@@ -135,7 +168,7 @@ class LegitimateControlEngine:
             exception_type=exception_type_str,
             target_type=target_type,
             target_id=first_target_id,
-            rule_expectation_id=None,
+            rule_expectation_id=ref.control_process_ref_id,
             applicability_state=applicability_state,
             approved_state=approved_state,
             approved_by_role_code=role_code,
@@ -155,8 +188,46 @@ class LegitimateControlEngine:
         updated_records = {k: list(v) for k, v in records.items()}
         updated_records.setdefault("exception", []).append(exception_record)
 
+        # Subject link resolution / injection
+        subject_id = first_target_id if first_target_id is not None else org_id
+        subject_links = records.get("control_process_subject_link", [])
+        existing_link = next(
+            (
+                link
+                for link in subject_links
+                if str(link.control_process_ref_id) == str(ref.control_process_ref_id)
+                and str(link.subject_id) == str(subject_id)
+            ),
+            None,
+        )
+
+        if existing_link is not None:
+            link_uuid = existing_link.control_process_link_id
+        else:
+            link_uuid = UUID(
+                self._ids.generate(
+                    "control_process_link",
+                    plan.plan_id,
+                    str(subject_id),
+                    ref.reference_code,
+                )
+            )
+            new_link = ControlProcessSubjectLinkRecord(
+                control_process_link_id=link_uuid,
+                control_process_ref_id=ref.control_process_ref_id,
+                subject_type=target_type,
+                subject_id=subject_id,
+                link_role="EXCEPTION_FOR" if is_complete else "SUPPORTS",
+                source_type="RULE_CONFIGURATION",
+                quality_state="VALID" if is_complete else "INCOMPLETE",
+                effective_start_at_utc=start_utc,
+                effective_end_at_utc=end_utc,
+            )
+            updated_records.setdefault("control_process_subject_link", []).append(new_link)
+
+        operational_ids = [str(exception_uuid), str(link_uuid)]
+
         # For process changes, also inject a ProcessChangeRecord
-        operational_ids = [str(exception_uuid)]
         if control_type in (
             ControlContextType.VALID_PROCESS_CHANGE,
             ControlContextType.APPROVED_AUTOMATION,
@@ -203,6 +274,8 @@ class LegitimateControlEngine:
             operational_evidence_ids=operational_ids,
             effective_start_utc=start_utc.isoformat(),
             effective_end_utc=end_utc.isoformat(),
+            control_process_ref_id=str(ref.control_process_ref_id),
+            control_process_link_id=str(link_uuid),
             is_complete=is_complete,
         )
 

@@ -50,6 +50,7 @@ class ScenarioSelector:
         reserved_ids: set[str] | None = None,
         control_context_type: ControlContextType | None = None,
         control_context_description: str | None = None,
+        control_process_ref_id: str | None = None,
     ) -> ScenarioPlan:
         """Select a valid target for a scenario realization.
 
@@ -62,6 +63,7 @@ class ScenarioSelector:
             reserved_ids: Already-reserved record IDs to avoid overlap.
             control_context_type: For LEGITIMATE_UNUSUAL, the control type.
             control_context_description: For LEGITIMATE_UNUSUAL, control description.
+            control_process_ref_id: Optional explicit M2 control/process reference ID.
 
         Returns:
             A ScenarioPlan with selected target records.
@@ -98,6 +100,30 @@ class ScenarioSelector:
 
         target_ids = selector_fn(records, organization_id, rng, reserved)
 
+        # For legitimate control or ambiguous control realization, select M2 control reference
+        ctrl_ref_id_str: str | None = None
+        ctrl_link_id_str: str | None = None
+        if realization == RealizationState.LEGITIMATE_UNUSUAL or control_context_type is not None:
+            ctrl_refs = records.get("control_process_reference", [])
+            chosen_ref = select_m2_control_reference(
+                scenario.scenario_id,
+                scenario.evidence_families_touched[0],
+                ctrl_refs,
+                control_process_ref_id,
+            )
+            ctrl_ref_id_str = str(chosen_ref.control_process_ref_id)
+
+            # Check for existing subject link in operational records
+            links = records.get("control_process_subject_link", [])
+            target_ids_set = set(target_ids) | {organization_id}
+            for link in links:
+                if (
+                    str(link.control_process_ref_id) == ctrl_ref_id_str
+                    and str(link.subject_id) in target_ids_set
+                ):
+                    ctrl_link_id_str = str(link.control_process_link_id)
+                    break
+
         plan_id = self._ids.generate(
             "scenario_plan",
             scenario.scenario_id,
@@ -117,7 +143,58 @@ class ScenarioSelector:
             seed_label=seed_label,
             control_context_type=control_context_type,
             control_context_description=control_context_description,
+            control_process_ref_id=ctrl_ref_id_str,
+            control_process_link_id=ctrl_link_id_str,
         )
+
+
+def select_m2_control_reference(
+    scenario_id: str,
+    target_family: str,
+    control_refs: list[Any],
+    preferred_ref_id: str | None = None,
+) -> Any:
+    """Select a deterministic M2 control/process reference from operational evidence.
+
+    Raises:
+        SelectionError: If no control references exist or if a specified reference cannot be found.
+    """
+    if not control_refs:
+        raise SelectionError("No control_process_reference records found in operational evidence")
+
+    if preferred_ref_id:
+        for ref in control_refs:
+            if (
+                str(ref.control_process_ref_id) == preferred_ref_id
+                or ref.reference_code == preferred_ref_id
+            ):
+                return ref
+        raise SelectionError(
+            f"Specified control reference '{preferred_ref_id}' not found in operational evidence",
+            context={"preferred_ref_id": preferred_ref_id},
+        )
+
+    # Deterministic matching by scenario/family preference
+    code_preference: list[str] = []
+    if scenario_id.startswith("EXEC-GAP"):
+        code_preference = ["REF-PROC-01", "REF-CTRL-02"]
+    elif scenario_id.startswith("NEG-SPACE"):
+        code_preference = ["REF-CTRL-01", "REF-PROC-02"]
+    elif scenario_id.startswith("HIST-REP"):
+        code_preference = ["REF-PROC-01", "REF-CTRL-01"]
+    elif scenario_id.startswith("PEER-CMP"):
+        code_preference = ["REF-CTRL-02", "REF-PROC-01"]
+    elif scenario_id.startswith("CROSS-REC"):
+        code_preference = ["REF-PROC-01", "REF-CTRL-02"]
+    elif scenario_id.startswith("LEGIT-CTRL"):
+        code_preference = ["REF-PROC-02", "REF-CTRL-01"]
+
+    for code in code_preference:
+        for ref in control_refs:
+            if ref.reference_code == code:
+                return ref
+
+    return control_refs[0]
 
 
 # ---------------------------------------------------------------------------

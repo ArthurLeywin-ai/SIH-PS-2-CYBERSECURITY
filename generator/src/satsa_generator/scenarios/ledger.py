@@ -20,6 +20,7 @@ from satsa_generator.scenarios.models import (
     AuthorizationEntry,
     AuthorizationStatus,
     MutationReceipt,
+    MutationType,
 )
 
 
@@ -91,6 +92,88 @@ class AuthorizationLedger:
         self._entries[entry.authorization_id] = entry
         for target_id in entry.target_record_ids:
             self._target_index.setdefault(target_id, []).append(entry.authorization_id)
+
+    def get_authorization(self, authorization_id: str) -> AuthorizationEntry | None:
+        """Retrieve an authorization entry by ID."""
+        return self._entries.get(authorization_id)
+
+    def verify_authorization(
+        self,
+        authorization_id: str,
+        expected_scenario_id: str,
+        expected_mutation_type: MutationType,
+        target_record_ids: tuple[str, ...],
+        target_family: str,
+    ) -> AuthorizationEntry:
+        """Verify authorization exists, is in PLANNED status, and matches expected parameters.
+
+        Raises:
+            AuthorizationError: If the authorization does not exist, has already been consumed,
+                or does not match the expected scenario, mutation type, target records, or family.
+        """
+        if authorization_id not in self._entries:
+            raise AuthorizationError(
+                f"Unauthorized mutation: no authorization found for '{authorization_id}'",
+                context={
+                    "authorization_id": authorization_id,
+                    "scenario_id": expected_scenario_id,
+                },
+            )
+
+        entry = self._entries[authorization_id]
+
+        if entry.status != AuthorizationStatus.PLANNED:
+            raise AuthorizationError(
+                f"Authorization '{authorization_id}' cannot be consumed; "
+                f"current status is '{entry.status}' (expected PLANNED)",
+                context={"authorization_id": authorization_id, "status": entry.status},
+            )
+
+        if entry.scenario_id != expected_scenario_id:
+            raise AuthorizationError(
+                f"Authorization '{authorization_id}' scenario mismatch: "
+                f"expected '{expected_scenario_id}', got '{entry.scenario_id}'",
+                context={
+                    "authorization_id": authorization_id,
+                    "expected": expected_scenario_id,
+                    "actual": entry.scenario_id,
+                },
+            )
+
+        if entry.mutation_type != expected_mutation_type:
+            raise AuthorizationError(
+                f"Authorization '{authorization_id}' mutation type mismatch: "
+                f"expected '{expected_mutation_type}', got '{entry.mutation_type}'",
+                context={
+                    "authorization_id": authorization_id,
+                    "expected": expected_mutation_type,
+                    "actual": entry.mutation_type,
+                },
+            )
+
+        if set(entry.target_record_ids) != set(target_record_ids):
+            raise AuthorizationError(
+                f"Authorization '{authorization_id}' target record mismatch: "
+                f"expected {target_record_ids}, got {entry.target_record_ids}",
+                context={
+                    "authorization_id": authorization_id,
+                    "expected": target_record_ids,
+                    "actual": entry.target_record_ids,
+                },
+            )
+
+        if entry.target_family != target_family:
+            raise AuthorizationError(
+                f"Authorization '{authorization_id}' target family mismatch: "
+                f"expected '{target_family}', got '{entry.target_family}'",
+                context={
+                    "authorization_id": authorization_id,
+                    "expected": target_family,
+                    "actual": entry.target_family,
+                },
+            )
+
+        return entry
 
     def consume(self, receipt: MutationReceipt) -> None:
         """Mark an authorization as consumed by a mutation receipt.

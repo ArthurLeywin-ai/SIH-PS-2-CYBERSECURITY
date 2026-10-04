@@ -30,7 +30,10 @@ from satsa_generator.scenarios.models import (
     RealizationState,
     ScenarioPlan,
 )
-from satsa_generator.scenarios.mutators import ScenarioMutator
+from satsa_generator.scenarios.mutators import (
+    ScenarioMutator,
+    plan_authorizations,
+)
 from satsa_generator.scenarios.selectors import ScenarioSelector
 from satsa_generator.scenarios.truth import GroundTruthWriter, LeakageScanner
 from satsa_generator.scenarios.validators import (
@@ -125,35 +128,67 @@ class ScenarioEngine:
 
         # Map each scenario to preferred realization state and control type
         scenario_plan_specs: list[tuple[str, RealizationState, ControlContextType | None]] = [
+            # A. Execution-gap (4 realizations)
             ("EXEC-GAP-001", RealizationState.CONCERNING, None),
             (
                 "EXEC-GAP-001",
                 RealizationState.LEGITIMATE_UNUSUAL,
                 ControlContextType.APPROVED_AUTOMATION,
             ),
-            ("EXEC-GAP-002", RealizationState.CONCERNING, None),
+            ("EXEC-GAP-001", RealizationState.AMBIGUOUS, None),
+            ("EXEC-GAP-001", RealizationState.NORMAL, None),
+            # B. Negative-space (4 realizations)
             ("NEG-SPACE-001", RealizationState.CONCERNING, None),
             (
                 "NEG-SPACE-001",
                 RealizationState.LEGITIMATE_UNUSUAL,
                 ControlContextType.MAINTENANCE_WINDOW,
             ),
-            ("NEG-SPACE-002", RealizationState.CONCERNING, None),
-            ("NEG-SPACE-002", RealizationState.NORMAL, None),
+            ("NEG-SPACE-001", RealizationState.AMBIGUOUS, None),
+            ("NEG-SPACE-001", RealizationState.NORMAL, None),
+            # C. Historical/repetition (4 realizations)
             ("HIST-REP-001", RealizationState.CONCERNING, None),
+            (
+                "HIST-REP-001",
+                RealizationState.LEGITIMATE_UNUSUAL,
+                ControlContextType.APPROVED_SUPPRESSION,
+            ),
+            ("HIST-REP-001", RealizationState.AMBIGUOUS, None),
+            ("HIST-REP-001", RealizationState.NORMAL, None),
+            # D. Peer-comparison (4 realizations)
             ("PEER-CMP-001", RealizationState.CONCERNING, None),
+            (
+                "PEER-CMP-001",
+                RealizationState.LEGITIMATE_UNUSUAL,
+                ControlContextType.VALID_ORGANIZATIONAL_CONTEXT,
+            ),
+            ("PEER-CMP-001", RealizationState.AMBIGUOUS, None),
+            ("PEER-CMP-001", RealizationState.NORMAL, None),
+            # E. Cross-record (4 realizations)
             ("CROSS-REC-001", RealizationState.CONCERNING, None),
             (
                 "CROSS-REC-001",
                 RealizationState.LEGITIMATE_UNUSUAL,
                 ControlContextType.VALID_PROCESS_CHANGE,
             ),
+            ("CROSS-REC-001", RealizationState.AMBIGUOUS, None),
+            ("CROSS-REC-001", RealizationState.NORMAL, None),
+            # F. Legitimate unusual/control (3 realizations; CONCERNING is documented inapplicable)
             (
                 "LEGIT-CTRL-001",
                 RealizationState.LEGITIMATE_UNUSUAL,
                 ControlContextType.LEGITIMATE_BURST,
             ),
+            (
+                "LEGIT-CTRL-001",
+                RealizationState.AMBIGUOUS,
+                ControlContextType.LEGITIMATE_BURST,
+            ),
+            ("LEGIT-CTRL-001", RealizationState.NORMAL, None),
+            # G. Ambiguous/insufficient evidence (2 realizations;
+            # CONCERNING & LEGITIMATE_UNUSUAL documented inapplicable)
             ("AMBIG-001", RealizationState.AMBIGUOUS, None),
+            ("AMBIG-001", RealizationState.NORMAL, None),
         ]
 
         org_cycle_idx = 0
@@ -188,7 +223,8 @@ class ScenarioEngine:
                         control_context_description=ctrl_desc,
                     )
                     plans.append(plan)
-                    reserved_ids.update(plan.target_record_ids)
+                    if scen_id != "PEER-CMP-001":
+                        reserved_ids.update(plan.target_record_ids)
                     break
                 except Exception:
                     continue
@@ -199,6 +235,12 @@ class ScenarioEngine:
                     f"with realization '{real_state}' without conflicting target reservation",
                     context={"scenario_id": scen_id, "attempted_orgs": candidate_orgs},
                 )
+
+        # Pre-authorize all planned mutations into the ledger BEFORE any mutator executes
+        for plan in plans:
+            for auth in plan_authorizations(plan):
+                if auth.authorization_id not in self._ledger.entries:
+                    self._ledger.authorize(auth)
 
         return plans
 
@@ -215,15 +257,21 @@ class ScenarioEngine:
     ]:
         """Execute a single scenario plan.
 
-        1. Generates legitimate control operational context if applicable.
-        2. Applies authorized mutations via ScenarioMutator.
-        3. Semantically validates operational condition via ScenarioValidator.
-        4. Records private ground truth via GroundTruthWriter.
+        1. Ensures mutations are pre-authorized in the ledger.
+        2. Generates legitimate control operational context if applicable.
+        3. Applies authorized mutations via ScenarioMutator.
+        4. Semantically validates operational condition via ScenarioValidator.
+        5. Records private ground truth via GroundTruthWriter.
 
         Returns:
             Tuple of (mutated_records, ground_truth_record, validation_report,
             receipts, control_declaration).
         """
+        # Ensure plan authorizations exist prior to mutation execution
+        for auth in plan_authorizations(plan):
+            if auth.authorization_id not in self._ledger.entries:
+                self._ledger.authorize(auth)
+
         current_records = {k: list(v) for k, v in records.items()}
         control_decl: LegitimateControlDeclaration | None = None
 
@@ -294,6 +342,12 @@ class ScenarioEngine:
             execution_plans = self.plan_scenarios(current_records, period_id=period_id)
         elif execution_plans is None:
             execution_plans = []
+        else:
+            # Pre-authorize provided explicit plans
+            for plan in execution_plans:
+                for auth in plan_authorizations(plan):
+                    if auth.authorization_id not in self._ledger.entries:
+                        self._ledger.authorize(auth)
 
         all_gt_records: list[GroundTruthRecord] = []
         all_reports: list[ScenarioValidationReport] = []
