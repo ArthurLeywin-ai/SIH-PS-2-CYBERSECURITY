@@ -173,6 +173,53 @@ def test_corruption_wrong_related_id(
         )
 
 
+def test_corruption_list_relationship_missing_member(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Test - missing member from relationship list fails."""
+    import json
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    json_file = result.operational_root / "case_src-c.json"
+
+    data = json.loads(json_file.read_text(encoding="utf-8"))
+    for item in data:
+        alerts = item.get("details", {}).get("alerts", [])
+        if len(alerts) > 0:
+            alerts.pop()
+            break
+
+    json_file.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Parse-back rel failure"):
+        parse_and_validate(
+            result.operational_root, tmp_path / "canonical_reference", "SRC-C", "case"
+        )
+
+
+def test_corruption_list_relationship_extra_member(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Test - extra wrong member in relationship list fails."""
+    import json
+    import uuid
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    json_file = result.operational_root / "case_src-c.json"
+
+    data = json.loads(json_file.read_text(encoding="utf-8"))
+    for item in data:
+        alerts = item.get("details", {}).get("alerts", [])
+        if len(alerts) > 0:
+            alerts.append(str(uuid.uuid4()))
+            break
+
+    json_file.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Parse-back rel failure"):
+        parse_and_validate(
+            result.operational_root, tmp_path / "canonical_reference", "SRC-C", "case"
+        )
+
+
 def test_reproducibility(tmp_path: Path, fixture_config_path: Path, master_seed: bytes) -> None:
     """Verify same seed produces byte-identical output hashes."""
     run1 = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path / "run1")

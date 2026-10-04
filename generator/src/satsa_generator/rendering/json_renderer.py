@@ -51,6 +51,13 @@ class JSONRenderer(BaseRenderer):
             if not canonical_id:
                 canonical_id = UUID(int=idx)
 
+            rels = {}
+            if context.oracle and canonical_id in context.oracle.expected_records:
+                rels = context.oracle.expected_records[canonical_id].relationships
+                for r_k, r_v in rels.items():
+                    if isinstance(r_v, list):
+                        record_dict[r_k] = [str(x) for x in r_v]
+
             for canonical_field, canonical_value in record_dict.items():
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)
                 if mapped:
@@ -79,11 +86,7 @@ class JSONRenderer(BaseRenderer):
                         )
                     )
 
-                    if (
-                        canonical_field.endswith("_id")
-                        and canonical_field != f"{family}_id"
-                        and isinstance(record_obj_dict.get(canonical_field), UUID)
-                    ):
+                    if canonical_field in rels:
                         context.relationship_provenance.append(
                             RelationshipProvenance(
                                 source_file_path=context.output_path,
@@ -91,7 +94,7 @@ class JSONRenderer(BaseRenderer):
                                 source_relationship_field=path[-1] if path else source_name,
                                 relationship_type=canonical_field,
                                 canonical_subject_id=canonical_id,
-                                canonical_object_id=record_obj_dict[canonical_field],
+                                canonical_object_id=rels[canonical_field],
                             )
                         )
 

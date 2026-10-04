@@ -1,5 +1,6 @@
 """Parse-back validation logic for M3 tests."""
 
+import contextlib
 import csv
 import json
 from pathlib import Path
@@ -126,6 +127,23 @@ def parse_and_validate(
 
             # Normalization comparisons (e.g. string casting for UUIDs/times)
             if expected_val is not None:
+                if isinstance(expected_val, list):
+                    if isinstance(raw_val, str):
+                        with contextlib.suppress(Exception):
+                            raw_val = json.loads(raw_val)
+
+                    if isinstance(raw_val, list):
+                        raw_set = {str(x) for x in raw_val}
+                        exp_set = {str(x) for x in expected_val}
+                        if raw_set == exp_set and len(raw_val) == len(expected_val):
+                            continue # bypass further comparison
+
+                        err_msg = (
+                            f"Parse-back failure for {canonical_id} field {can_field}: "
+                            f"expected '{expected_val}', got '{raw_val}'"
+                        )
+                        raise ValueError(err_msg)
+
                 if isinstance(expected_val, bool) and isinstance(raw_val, str):
                     raw_val = raw_val.lower() == "true"
                 elif (
@@ -195,7 +213,26 @@ def parse_and_validate(
 
             if raw_val is not None:
                 if isinstance(expected_rel, list):
-                    pass  # Lists not fully mapped in parser yet
+                    if isinstance(raw_val, str):
+                        with contextlib.suppress(Exception):
+                            raw_val = json.loads(raw_val)
+
+                    if not isinstance(raw_val, list):
+                        raise ValueError(
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: expected list, got '{type(raw_val)}'"
+                        )
+
+                    raw_set = {str(x) for x in raw_val}
+                    exp_set = {str(x) for x in expected_rel}
+                    if raw_set != exp_set:
+                        raise ValueError(
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: expected {exp_set}, got {raw_set}"
+                        )
+
+                    if len(raw_val) != len(expected_rel):
+                        raise ValueError(
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: expected length {len(expected_rel)}, got {len(raw_val)}"
+                        )
                 else:
                     if str(raw_val) != str(expected_rel):
                         err_msg2 = (
@@ -203,7 +240,8 @@ def parse_and_validate(
                             f"expected '{expected_rel}', got '{raw_val}'"
                         )
                         raise ValueError(err_msg2)
-            elif expected_rel is not None:
-                # If relationship isn't represented natively in output, it could be missing here.
-                # If the profile DOES map this relationship, it should be present.
-                pass
+            elif expected_rel is not None and fmap and fmap.is_present:
+                raise ValueError(
+                    f"Parse-back rel failure {canonical_id} rel {rel_name}: "
+                    f"expected '{expected_rel}', got missing"
+                )

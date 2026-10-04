@@ -10,6 +10,7 @@ import abc
 from dataclasses import dataclass, field
 from typing import Any
 
+from satsa_generator.canonical.oracle import CanonicalOracle
 from satsa_generator.fixture.models import FixtureRecord
 from satsa_generator.profiles.models import ProfileDefinition
 from satsa_generator.provenance.models import (
@@ -28,6 +29,7 @@ class RenderContext:
     indexes: list[SourceRecordIndex] = field(default_factory=list)
     field_provenance: list[FieldProvenance] = field(default_factory=list)
     relationship_provenance: list[RelationshipProvenance] = field(default_factory=list)
+    oracle: CanonicalOracle | None = None
 
 
 class BaseRenderer(abc.ABC):

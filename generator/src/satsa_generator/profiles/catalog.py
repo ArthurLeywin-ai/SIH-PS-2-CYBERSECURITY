@@ -406,6 +406,7 @@ def get_src_c() -> ProfileDefinition:
                 "created_at_utc": FieldMapping(
                     source_name="createdAtUtc", path=["details", "createdAtUtc"]
                 ),
+                "alerts": FieldMapping(source_name="alerts", path=["details", "alerts"]),
             },
             "case_alert_link": {
                 "case_alert_link_id": FieldMapping(
@@ -550,6 +551,7 @@ def get_src_d() -> ProfileDefinition:
                 "case_type": FieldMapping(source_name="cas_type"),
                 "severity": FieldMapping(source_name="sev"),
                 "created_at_utc": FieldMapping(source_name="cre_at_utc"),
+                "alerts": FieldMapping(source_name="alerts"),
             },
             "case_alert_link": {
                 "case_alert_link_id": FieldMapping(source_name="cas_ale_id", is_native_id=True),

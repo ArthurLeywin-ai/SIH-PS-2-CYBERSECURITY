@@ -66,6 +66,7 @@ class RenderingEngine:
         context = RenderContext(
             profile=self.profile,
             output_path=relative_path,
+            oracle=self.oracle,
         )
 
         content = self.renderer.render_records(family, records, context)

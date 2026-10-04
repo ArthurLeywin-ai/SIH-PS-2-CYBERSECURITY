@@ -43,5 +43,5 @@ class RelationshipProvenance(BaseModel):
     source_record_locator: str
     source_relationship_field: str | None = None
     canonical_subject_id: UUID
-    canonical_object_id: UUID
+    canonical_object_id: UUID | list[UUID]
     relationship_type: str

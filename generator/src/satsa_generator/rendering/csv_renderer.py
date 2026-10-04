@@ -53,10 +53,22 @@ class CSVRenderer(BaseRenderer):
                 # Fallback if no specific ID is found (shouldn't happen in M2 models)
                 canonical_id = UUID(int=idx)
 
+            rels = {}
+            if context.oracle and canonical_id in context.oracle.expected_records:
+                rels = context.oracle.expected_records[canonical_id].relationships
+                for r_k, r_v in rels.items():
+                    if isinstance(r_v, list):
+                        record_dict[r_k] = [str(x) for x in r_v]
+
             for canonical_field, canonical_value in record_dict.items():
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)
                 if mapped:
                     source_name, source_value, _ = mapped
+
+                    if isinstance(source_value, list):
+                        # Convert list to a JSON string for CSV rendering
+                        source_value = json.dumps(source_value)
+
                     source_row[source_name] = source_value
 
                     context.field_provenance.append(
@@ -69,11 +81,7 @@ class CSVRenderer(BaseRenderer):
                         )
                     )
 
-                    if (
-                        canonical_field.endswith("_id")
-                        and canonical_field != f"{family}_id"
-                        and isinstance(record_obj_dict.get(canonical_field), UUID)
-                    ):
+                    if canonical_field in rels:
                         context.relationship_provenance.append(
                             RelationshipProvenance(
                                 source_file_path=context.output_path,
@@ -81,7 +89,7 @@ class CSVRenderer(BaseRenderer):
                                 source_relationship_field=source_name,
                                 relationship_type=canonical_field,
                                 canonical_subject_id=canonical_id,
-                                canonical_object_id=record_obj_dict[canonical_field],
+                                canonical_object_id=rels[canonical_field],
                             )
                         )
 
