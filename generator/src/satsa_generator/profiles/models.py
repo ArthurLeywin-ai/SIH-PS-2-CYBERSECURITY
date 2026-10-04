@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class VocabularyMap(BaseModel):
     """Deterministic vocabulary mapping from Canonical -> Source -> Canonical."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     # E.g. {"HIGH": "3", "LOW": "1"}
@@ -48,7 +49,7 @@ class ProfileDefinition(BaseModel):
     format: Literal["CSV", "JSON", "JSONL"]
     case_naming: Literal["snake_case", "pascal_case", "camel_case", "mixed"] = "snake_case"
     timestamp_format: Literal["iso_z", "iso_offset_ms", "local_iana", "date_only"]
-    timezone: str = "UTC" # For local_iana
+    timezone: str = "UTC"  # For local_iana
 
     # Whether child IDs or relationships are nested
     relationships_nested: bool = False

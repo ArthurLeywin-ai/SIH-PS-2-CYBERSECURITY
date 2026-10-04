@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 class CanonicalRecordState(BaseModel):
     """The expected canonical state of a record after normalization."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     canonical_record_id: UUID
@@ -35,7 +36,7 @@ class CanonicalOracle:
         """Return a deterministic hash of the entire oracle."""
         sorted_records = sorted(
             [r.model_dump(mode="json") for r in self.expected_records.values()],
-            key=lambda x: x["canonical_record_id"]
+            key=lambda x: x["canonical_record_id"],
         )
         content = json.dumps(sorted_records, separators=(",", ":"), sort_keys=True).encode("utf-8")
         return hashlib.sha256(content).hexdigest()

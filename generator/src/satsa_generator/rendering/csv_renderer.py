@@ -9,8 +9,13 @@ import json
 from uuid import UUID
 
 from satsa_generator.fixture.models import FixtureRecord
-from satsa_generator.provenance.models import FieldProvenance, RelationshipProvenance, SourceRecordIndex
+from satsa_generator.provenance.models import (
+    FieldProvenance,
+    RelationshipProvenance,
+    SourceRecordIndex,
+)
 from satsa_generator.rendering.interfaces import BaseRenderer, RenderContext
+
 
 class CSVRenderer(BaseRenderer):
     """Renders canonical records to CSV following profile rules."""
@@ -37,9 +42,8 @@ class CSVRenderer(BaseRenderer):
             sub_id = None
 
             for key, val in record_obj_dict.items():
-                if key.endswith("_id") and isinstance(val, UUID):
-                    if canonical_id is None:
-                        canonical_id = val
+                if key.endswith("_id") and isinstance(val, UUID) and canonical_id is None:
+                            canonical_id = val
                 if key == "organization_id" and isinstance(val, UUID):
                     org_id = val
                 if key == "submission_id" and isinstance(val, UUID):
@@ -58,18 +62,22 @@ class CSVRenderer(BaseRenderer):
                     context.field_provenance.append(
                         FieldProvenance(
                             source_file_path=context.output_path,
-                            source_record_locator=f"row:{idx+1}",
+                            source_record_locator=f"row:{idx + 1}",
                             source_field_name=source_name,
                             canonical_record_id=canonical_id,
                             canonical_field_name=canonical_field,
                         )
                     )
-                    
-                    if canonical_field.endswith("_id") and canonical_field != f"{family}_id" and isinstance(record_obj_dict.get(canonical_field), UUID):
+
+                    if (
+                        canonical_field.endswith("_id")
+                        and canonical_field != f"{family}_id"
+                        and isinstance(record_obj_dict.get(canonical_field), UUID)
+                    ):
                         context.relationship_provenance.append(
                             RelationshipProvenance(
                                 source_file_path=context.output_path,
-                                source_record_locator=f"row:{idx+1}",
+                                source_record_locator=f"row:{idx + 1}",
                                 source_relationship_field=source_name,
                                 relationship_type=canonical_field,
                                 canonical_subject_id=canonical_id,
@@ -96,7 +104,7 @@ class CSVRenderer(BaseRenderer):
                     submission_id=sub_id,
                     evidence_family=family,
                     canonical_record_id=canonical_id,
-                    source_record_locator=f"row:{idx+1}",
+                    source_record_locator=f"row:{idx + 1}",
                     source_checksum=checksum,
                 )
             )

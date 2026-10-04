@@ -7,8 +7,13 @@ import json
 from uuid import UUID
 
 from satsa_generator.fixture.models import FixtureRecord
-from satsa_generator.provenance.models import FieldProvenance, RelationshipProvenance, SourceRecordIndex
+from satsa_generator.provenance.models import (
+    FieldProvenance,
+    RelationshipProvenance,
+    SourceRecordIndex,
+)
 from satsa_generator.rendering.interfaces import BaseRenderer, RenderContext
+
 
 class JSONRenderer(BaseRenderer):
     """Renders canonical records to JSON following profile rules."""
@@ -36,9 +41,8 @@ class JSONRenderer(BaseRenderer):
             sub_id = None
 
             for key, val in record_obj_dict.items():
-                if key.endswith("_id") and isinstance(val, UUID):
-                    if canonical_id is None:
-                        canonical_id = val
+                if key.endswith("_id") and isinstance(val, UUID) and canonical_id is None:
+                            canonical_id = val
                 if key == "organization_id" and isinstance(val, UUID):
                     org_id = val
                 if key == "submission_id" and isinstance(val, UUID):
@@ -74,8 +78,12 @@ class JSONRenderer(BaseRenderer):
                             canonical_field_name=canonical_field,
                         )
                     )
-                    
-                    if canonical_field.endswith("_id") and canonical_field != f"{family}_id" and isinstance(record_obj_dict.get(canonical_field), UUID):
+
+                    if (
+                        canonical_field.endswith("_id")
+                        and canonical_field != f"{family}_id"
+                        and isinstance(record_obj_dict.get(canonical_field), UUID)
+                    ):
                         context.relationship_provenance.append(
                             RelationshipProvenance(
                                 source_file_path=context.output_path,

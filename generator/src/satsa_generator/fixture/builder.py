@@ -395,10 +395,11 @@ def _build_m3_fixture_internal(
     )
 
     from uuid import UUID
-    from satsa_generator.profiles.catalog import get_profile
+
     from satsa_generator.canonical.oracle import CanonicalOracle, CanonicalRecordState
+    from satsa_generator.profiles.catalog import get_profile
     from satsa_generator.rendering.engine import RenderingEngine
-    
+
     oracle = CanonicalOracle()
     # Populate the oracle
     for family_name, rec_list in [
@@ -419,20 +420,19 @@ def _build_m3_fixture_internal(
         ("resolution", resolutions),
         ("closure", closures),
         ("exception", exceptions),
-        ("process_change", process_changes)
+        ("process_change", process_changes),
     ]:
         for idx, record in enumerate(rec_list):
             record_dict = record.model_dump(mode="json")
             record_obj_dict = record.model_dump()
-            
+
             canonical_id = None
             if f"{family_name}_id" in record_obj_dict:
                 canonical_id = record_obj_dict[f"{family_name}_id"]
             else:
                 for key, val in record_obj_dict.items():
-                    if key.endswith("_id") and isinstance(val, UUID):
-                        if canonical_id is None:
-                            canonical_id = val
+                    if key.endswith("_id") and isinstance(val, UUID) and canonical_id is None:
+                                canonical_id = val
 
             if not canonical_id:
                 canonical_id = UUID(int=idx)
@@ -445,7 +445,9 @@ def _build_m3_fixture_internal(
 
             # For case -> alerts many-to-many
             if family_name == "case":
-                alerts_for_case = [link.alert_id for link in case_alert_links if link.case_id == canonical_id]
+                alerts_for_case = [
+                    link.alert_id for link in case_alert_links if link.case_id == canonical_id
+                ]
                 if alerts_for_case:
                     rels["alerts"] = alerts_for_case
 
@@ -454,7 +456,7 @@ def _build_m3_fixture_internal(
                     canonical_record_id=canonical_id,
                     canonical_family=family_name,
                     fields=record_dict,
-                    relationships=rels
+                    relationships=rels,
                 )
             )
 
@@ -545,11 +547,11 @@ def _build_m3_fixture_internal(
         file_manifests.append(f_pc)
 
     # Write oracle and provenance metadata
-    oracle_hash_a = engine_a.write_metadata(oracle_root, "src_a")
-    oracle_hash_b = engine_b.write_metadata(oracle_root, "src_b")
-    oracle_hash_c = engine_c.write_metadata(oracle_root, "src_c")
-    oracle_hash_d = engine_d.write_metadata(oracle_root, "src_d")
-    oracle_hash_e = engine_e.write_metadata(oracle_root, "src_e")
+    engine_a.write_metadata(oracle_root, "src_a")
+    engine_b.write_metadata(oracle_root, "src_b")
+    engine_c.write_metadata(oracle_root, "src_c")
+    engine_d.write_metadata(oracle_root, "src_d")
+    engine_e.write_metadata(oracle_root, "src_e")
 
     record_counts = {
         "organization": len(organizations),

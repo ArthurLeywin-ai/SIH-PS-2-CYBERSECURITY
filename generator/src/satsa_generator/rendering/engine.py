@@ -7,9 +7,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
-from satsa_generator.canonical.oracle import CanonicalOracle, CanonicalRecordState
+from satsa_generator.canonical.oracle import CanonicalOracle
 from satsa_generator.fixture.models import FixtureRecord
 from satsa_generator.profiles.models import ProfileDefinition
 from satsa_generator.provenance.models import (
@@ -25,6 +24,7 @@ from satsa_generator.rendering.json_renderer import JSONRenderer
 @dataclass
 class RenderResult:
     """Result of rendering a batch of records."""
+
     files_written: list[dict[str, Any]]
     indexes: list[SourceRecordIndex]
     field_provenance: list[FieldProvenance]
@@ -87,9 +87,18 @@ class RenderingEngine:
         """Deterministically hash the provenance and oracle."""
         combined = {
             "oracle": self.oracle.calculate_oracle_hash(),
-            "indexes": sorted([idx.model_dump(mode="json") for idx in self.indexes], key=lambda x: x["source_record_locator"]),
-            "field_provenance": sorted([fp.model_dump(mode="json") for fp in self.field_provenance], key=lambda x: (x["source_record_locator"], x["canonical_field_name"])),
-            "relationship_provenance": sorted([rp.model_dump(mode="json") for rp in self.relationship_provenance], key=lambda x: x["source_record_locator"]),
+            "indexes": sorted(
+                [idx.model_dump(mode="json") for idx in self.indexes],
+                key=lambda x: x["source_record_locator"],
+            ),
+            "field_provenance": sorted(
+                [fp.model_dump(mode="json") for fp in self.field_provenance],
+                key=lambda x: (x["source_record_locator"], x["canonical_field_name"]),
+            ),
+            "relationship_provenance": sorted(
+                [rp.model_dump(mode="json") for rp in self.relationship_provenance],
+                key=lambda x: x["source_record_locator"],
+            ),
         }
         content = json.dumps(combined, separators=(",", ":"), sort_keys=True).encode("utf-8")
         return hashlib.sha256(content).hexdigest()
@@ -109,7 +118,9 @@ class RenderingEngine:
         prov_path = base_path / f"{prefix}_provenance.json"
         prov_data = {
             "field_provenance": [fp.model_dump(mode="json") for fp in self.field_provenance],
-            "relationship_provenance": [rp.model_dump(mode="json") for rp in self.relationship_provenance]
+            "relationship_provenance": [
+                rp.model_dump(mode="json") for rp in self.relationship_provenance
+            ],
         }
         prov_path.write_text(json.dumps(prov_data, indent=2, sort_keys=True), encoding="utf-8")
 

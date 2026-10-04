@@ -22,6 +22,7 @@ from satsa_generator.provenance.models import (
 @dataclass
 class RenderContext:
     """Context passed to renderers."""
+
     profile: ProfileDefinition
     output_path: str  # logical relative path
     indexes: list[SourceRecordIndex] = field(default_factory=list)
@@ -52,7 +53,7 @@ class BaseRenderer(abc.ABC):
         """Apply profile mapping rules for a specific field."""
         family_map = context.profile.family_mappings.get(family, {})
         mapping = family_map.get(canonical_field)
-        
+
         if mapping and not mapping.is_present:
             return None
 
@@ -75,7 +76,15 @@ class BaseRenderer(abc.ABC):
         if canonical_value is None and mapping and mapping.default_if_missing is not None:
             source_val = mapping.default_if_missing
 
-        if isinstance(source_val, str) and ("T" in source_val and ("Z" in source_val or "+00:00" in source_val)) and (canonical_field.endswith("_utc") or canonical_field.endswith("at") or canonical_field == "profile_effective_start_at_utc"):
+        if (
+            isinstance(source_val, str)
+            and ("T" in source_val and ("Z" in source_val or "+00:00" in source_val))
+            and (
+                canonical_field.endswith("_utc")
+                or canonical_field.endswith("at")
+                or canonical_field == "profile_effective_start_at_utc"
+            )
+        ):
             if context.profile.timestamp_format == "iso_z":
                 source_val = source_val.replace("+00:00", "Z")
             elif context.profile.timestamp_format == "iso_offset_ms":
@@ -91,5 +100,5 @@ class BaseRenderer(abc.ABC):
                 source_val = vocab[source_val]
             elif mapping.vocabulary.on_unknown == "fail":
                 raise ValueError(f"Unmapped vocabulary value: {source_val}")
-            
+
         return source_name, source_val, path

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 class SourceRecordIndex(BaseModel):
     """Index mapping a specific source record to its canonical origin."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source_file_path: str
@@ -23,6 +24,7 @@ class SourceRecordIndex(BaseModel):
 
 class FieldProvenance(BaseModel):
     """Provenance for a single field."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source_file_path: str
@@ -34,6 +36,7 @@ class FieldProvenance(BaseModel):
 
 class RelationshipProvenance(BaseModel):
     """Provenance for a relationship between two canonical records."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source_file_path: str

@@ -33,12 +33,20 @@ def parse_and_validate(
 
     # Load Oracle Expectation
     oracle_data = json.loads(oracle_path.read_text(encoding="utf-8"))
-    expected_by_id = {UUID(r["canonical_record_id"]): r for r in oracle_data if r["canonical_family"] == evidence_family}
+    expected_by_id = {
+        UUID(r["canonical_record_id"]): r
+        for r in oracle_data
+        if r["canonical_family"] == evidence_family
+    }
 
     # Load Index to know which record is which
     index_path = oracle_root / f"{profile_id.lower().replace('-', '_')}_index.json"
     index_data = json.loads(index_path.read_text(encoding="utf-8"))
-    locators_to_canonical = {idx["source_record_locator"]: UUID(idx["canonical_record_id"]) for idx in index_data if idx["evidence_family"] == evidence_family}
+    locators_to_canonical = {
+        idx["source_record_locator"]: UUID(idx["canonical_record_id"])
+        for idx in index_data
+        if idx["evidence_family"] == evidence_family
+    }
 
     # Parse file
     records = []
@@ -58,7 +66,7 @@ def parse_and_validate(
     family_map = profile.family_mappings.get(evidence_family, {})
 
     for idx, row in enumerate(records):
-        locator = f"row:{idx+1}" if ext == "csv" else f"[{idx}]"
+        locator = f"row:{idx + 1}" if ext == "csv" else f"[{idx}]"
         canonical_id = locators_to_canonical.get(locator)
         if not canonical_id:
             raise ValueError(f"No index found for {locator}")
@@ -120,24 +128,40 @@ def parse_and_validate(
             if expected_val is not None:
                 if isinstance(expected_val, bool) and isinstance(raw_val, str):
                     raw_val = raw_val.lower() == "true"
-                elif isinstance(expected_val, int) and not isinstance(expected_val, bool) and isinstance(raw_val, str):
+                elif (
+                    isinstance(expected_val, int)
+                    and not isinstance(expected_val, bool)
+                    and isinstance(raw_val, str)
+                ):
                     raw_val = int(raw_val)
                 elif isinstance(expected_val, float) and isinstance(raw_val, str):
                     raw_val = float(raw_val)
                 elif raw_val is not None:
                     raw_val = str(raw_val)
                     expected_val = str(expected_val)
-                    if can_field.endswith("_utc") or can_field.endswith("at") or can_field == "profile_effective_start_at_utc":
+                    if (
+                        can_field.endswith("_utc")
+                        or can_field.endswith("at")
+                        or can_field == "profile_effective_start_at_utc"
+                    ):
                         if profile.timestamp_format == "iso_z" and "+00:00" in expected_val:
                             expected_val = expected_val.replace("+00:00", "Z")
                         elif profile.timestamp_format == "iso_offset_ms":
-                             expected_val = expected_val.replace("Z", "+00:00")
+                            expected_val = expected_val.replace("Z", "+00:00")
                         elif profile.timestamp_format == "local_iana":
-                            expected_val = expected_val.replace("+00:00", "").replace("Z", "").replace("T", " ")
+                            expected_val = (
+                                expected_val.replace("+00:00", "")
+                                .replace("Z", "")
+                                .replace("T", " ")
+                            )
                         elif profile.timestamp_format == "date_only":
                             expected_val = expected_val[:10]
             if raw_val != expected_val:
-                raise ValueError(f"Parse-back failure for {canonical_id} field {can_field}: expected '{expected_val}', got '{raw_val}'")
+                err_msg = (
+                    f"Parse-back failure for {canonical_id} field {can_field}: "
+                    f"expected '{expected_val}', got '{raw_val}'"
+                )
+                raise ValueError(err_msg)
 
         for rel_name, expected_rel in expected_record.get("relationships", {}).items():
             fmap = family_map.get(rel_name)
@@ -171,11 +195,15 @@ def parse_and_validate(
 
             if raw_val is not None:
                 if isinstance(expected_rel, list):
-                    pass # Lists not fully mapped in parser yet
+                    pass  # Lists not fully mapped in parser yet
                 else:
                     if str(raw_val) != str(expected_rel):
-                        raise ValueError(f"Parse-back relationship failure for {canonical_id} rel {rel_name}: expected '{expected_rel}', got '{raw_val}'")
+                        err_msg2 = (
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
+                            f"expected '{expected_rel}', got '{raw_val}'"
+                        )
+                        raise ValueError(err_msg2)
             elif expected_rel is not None:
-                # If relationship isn't represented natively in the output, it could be missing here. 
-                # For our requirements, if the profile DOES map this relationship, it should be present.
+                # If relationship isn't represented natively in output, it could be missing here.
+                # If the profile DOES map this relationship, it should be present.
                 pass
