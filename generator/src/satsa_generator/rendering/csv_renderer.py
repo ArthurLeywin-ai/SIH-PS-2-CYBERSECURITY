@@ -43,7 +43,7 @@ class CSVRenderer(BaseRenderer):
 
             for key, val in record_obj_dict.items():
                 if key.endswith("_id") and isinstance(val, UUID) and canonical_id is None:
-                            canonical_id = val
+                    canonical_id = val
                 if key == "organization_id" and isinstance(val, UUID):
                     org_id = val
                 if key == "submission_id" and isinstance(val, UUID):
@@ -53,12 +53,11 @@ class CSVRenderer(BaseRenderer):
                 # Fallback if no specific ID is found (shouldn't happen in M2 models)
                 canonical_id = UUID(int=idx)
 
-            rels = {}
-            if context.oracle and canonical_id in context.oracle.expected_records:
-                rels = context.oracle.expected_records[canonical_id].relationships
-                for r_k, r_v in rels.items():
-                    if isinstance(r_v, list):
-                        record_dict[r_k] = [str(x) for x in r_v]
+            # Get relationships from operational records, NOT from oracle
+            rels = self.get_relationships_for_record(canonical_id, family, context)
+            for r_k, r_v in rels.items():
+                # Relationships are always lists now
+                record_dict[r_k] = [str(x) for x in r_v]
 
             for canonical_field, canonical_value in record_dict.items():
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)

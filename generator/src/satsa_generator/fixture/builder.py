@@ -401,7 +401,7 @@ def _build_m3_fixture_internal(
     from satsa_generator.rendering.engine import RenderingEngine
 
     oracle = CanonicalOracle()
-    # Populate the oracle
+    # Populate the oracle for validation (independent of rendering)
     for family_name, rec_list in [
         ("organization", organizations),
         ("submission", submissions),
@@ -432,7 +432,7 @@ def _build_m3_fixture_internal(
             else:
                 for key, val in record_obj_dict.items():
                     if key.endswith("_id") and isinstance(val, UUID) and canonical_id is None:
-                                canonical_id = val
+                        canonical_id = val
 
             if not canonical_id:
                 canonical_id = UUID(int=idx)
@@ -466,11 +466,11 @@ def _build_m3_fixture_internal(
     profile_d = get_profile("SRC-D")
     profile_e = get_profile("SRC-E")
 
-    engine_a = RenderingEngine(source_exports_root, profile_a, oracle)
-    engine_b = RenderingEngine(source_exports_root, profile_b, oracle)
-    engine_c = RenderingEngine(source_exports_root, profile_c, oracle)
-    engine_d = RenderingEngine(source_exports_root, profile_d, oracle)
-    engine_e = RenderingEngine(source_exports_root, profile_e, oracle)
+    engine_a = RenderingEngine(source_exports_root, profile_a)
+    engine_b = RenderingEngine(source_exports_root, profile_b)
+    engine_c = RenderingEngine(source_exports_root, profile_c)
+    engine_d = RenderingEngine(source_exports_root, profile_d)
+    engine_e = RenderingEngine(source_exports_root, profile_e)
 
     file_manifests = []
 
@@ -510,7 +510,15 @@ def _build_m3_fixture_internal(
     if f_al:
         file_manifests.append(f_al)
 
-    f_ca = engine_c.render_and_write("case", cases)
+    # Render cases with case_alert_links for case -> alerts relationship
+    f_ca = engine_c.render_and_write(
+        "case",
+        cases,
+        relationship_records=case_alert_links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
     if f_ca:
         file_manifests.append(f_ca)
 
@@ -547,6 +555,16 @@ def _build_m3_fixture_internal(
         file_manifests.append(f_pc)
 
     # Write oracle and provenance metadata
+    # Oracle is written for validation (parse-back), not for rendering
+    import json as json_module
+    oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
+    oracle_root.mkdir(parents=True, exist_ok=True)
+    for prefix in ["src_a", "src_b", "src_c", "src_d", "src_e"]:
+        oracle_path = oracle_root / f"{prefix}_oracle.json"
+        oracle_path.write_text(
+            json_module.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
     engine_a.write_metadata(oracle_root, "src_a")
     engine_b.write_metadata(oracle_root, "src_b")
     engine_c.write_metadata(oracle_root, "src_c")

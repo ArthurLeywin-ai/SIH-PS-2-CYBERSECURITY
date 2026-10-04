@@ -4,12 +4,21 @@ from __future__ import annotations
 
 from satsa_generator.profiles.models import FieldMapping, ProfileDefinition
 from satsa_generator.profiles.vocabulary import (
+    CATEGORY_SRC_D,
+    CATEGORY_SRC_E,
+    DISPOSITION_SRC_D,
+    DISPOSITION_SRC_E,
     MATURITY_SRC_B,
+    MATURITY_SRC_D,
+    MATURITY_SRC_E,
     SEVERITY_SRC_B,
     SEVERITY_SRC_C,
     SEVERITY_SRC_D,
+    SEVERITY_SRC_E,
     STATUS_SRC_B,
     STATUS_SRC_C,
+    STATUS_SRC_D,
+    STATUS_SRC_E,
 )
 
 
@@ -495,13 +504,17 @@ def get_src_d() -> ProfileDefinition:
                 "entity_criticality_band": FieldMapping(
                     source_name="ent_cri_band", vocabulary=SEVERITY_SRC_D
                 ),
-                "organization_status": FieldMapping(source_name="org_status"),
+                "organization_status": FieldMapping(
+                    source_name="org_status", vocabulary=STATUS_SRC_D
+                ),
                 "profile_effective_start_at_utc": FieldMapping(source_name="pro_eff_utc"),
             },
             "submission": {
                 "submission_id": FieldMapping(source_name="sub_id", is_native_id=True),
                 "organization_id": FieldMapping(source_name="org_id"),
-                "period_maturity_state": FieldMapping(source_name="per_mat_state"),
+                "period_maturity_state": FieldMapping(
+                    source_name="per_mat_state", vocabulary=MATURITY_SRC_D
+                ),
                 "reporting_period_start_at_utc": FieldMapping(source_name="rep_per_utc"),
             },
             "submission_manifest": {
@@ -544,12 +557,15 @@ def get_src_d() -> ProfileDefinition:
                 "organization_id": FieldMapping(source_name="org_id"),
                 "asset_id": FieldMapping(source_name="ass_id"),
                 "created_at_utc": FieldMapping(source_name="cre_at_utc"),
+                "alert_category": FieldMapping(source_name="ale_cat", vocabulary=CATEGORY_SRC_D),
+                "severity": FieldMapping(source_name="ale_sev", vocabulary=SEVERITY_SRC_D),
+                "disposition": FieldMapping(source_name="ale_disp", vocabulary=DISPOSITION_SRC_D),
             },
             "case": {
                 "case_id": FieldMapping(source_name="cas_id", is_native_id=True),
                 "organization_id": FieldMapping(source_name="org_id"),
                 "case_type": FieldMapping(source_name="cas_type"),
-                "severity": FieldMapping(source_name="sev"),
+                "severity": FieldMapping(source_name="cas_sev", vocabulary=SEVERITY_SRC_D),
                 "created_at_utc": FieldMapping(source_name="cre_at_utc"),
                 "alerts": FieldMapping(source_name="alerts"),
             },
@@ -565,6 +581,7 @@ def get_src_d() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="cas_id"),
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "started_at_utc": FieldMapping(source_name="sta_at_utc"),
+                "disposition": FieldMapping(source_name="inv_disp", vocabulary=DISPOSITION_SRC_D),
             },
             "escalation": {
                 "escalation_id": FieldMapping(source_name="esc_id", is_native_id=True),
@@ -587,6 +604,9 @@ def get_src_d() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="cas_id"),
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "resolved_at_utc": FieldMapping(source_name="res_at_utc"),
+                "resolution_type": FieldMapping(
+                    source_name="res_type", vocabulary=DISPOSITION_SRC_D
+                ),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="clo_id", is_native_id=True),
@@ -595,6 +615,7 @@ def get_src_d() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "resolution_id": FieldMapping(source_name="res_id"),
                 "closed_at_utc": FieldMapping(source_name="clo_at_utc"),
+                "disposition": FieldMapping(source_name="clo_disp", vocabulary=DISPOSITION_SRC_D),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="exc_id", is_native_id=True),
@@ -622,15 +643,19 @@ def get_src_e() -> ProfileDefinition:
                 "source_organization_id": FieldMapping(source_name="v2_sou_org_id"),
                 "organization_name": FieldMapping(source_name="v2_org_name"),
                 "entity_criticality_band": FieldMapping(
-                    source_name="v2_ent_cri_band", vocabulary=SEVERITY_SRC_B
+                    source_name="v2_ent_cri_band", vocabulary=SEVERITY_SRC_E
                 ),
-                "organization_status": FieldMapping(source_name="v2_org_status"),
+                "organization_status": FieldMapping(
+                    source_name="v2_org_status", vocabulary=STATUS_SRC_E
+                ),
                 "profile_effective_start_at_utc": FieldMapping(source_name="v2_pro_eff_utc"),
             },
             "submission": {
                 "submission_id": FieldMapping(source_name="v2_sub_id", is_native_id=True),
                 "organization_id": FieldMapping(source_name="v2_org_id"),
-                "period_maturity_state": FieldMapping(source_name="v2_per_mat_state"),
+                "period_maturity_state": FieldMapping(
+                    source_name="v2_per_mat_state", vocabulary=MATURITY_SRC_E
+                ),
                 "reporting_period_start_at_utc": FieldMapping(source_name="v2_rep_per_utc"),
             },
             "submission_manifest": {
@@ -677,12 +702,21 @@ def get_src_e() -> ProfileDefinition:
                 "organization_id": FieldMapping(source_name="v2_org_id"),
                 "asset_id": FieldMapping(source_name="v2_ass_id"),
                 "created_at_utc": FieldMapping(source_name="v2_cre_at_utc"),
+                "alert_category": FieldMapping(
+                    source_name="v2_ale_cat", vocabulary=CATEGORY_SRC_E
+                ),
+                "severity": FieldMapping(
+                    source_name="v2_ale_sev", vocabulary=SEVERITY_SRC_E
+                ),
+                "disposition": FieldMapping(
+                    source_name="v2_ale_disp", vocabulary=DISPOSITION_SRC_E
+                ),
             },
             "case": {
                 "case_id": FieldMapping(source_name="v2_cas_id", is_native_id=True),
                 "organization_id": FieldMapping(source_name="v2_org_id"),
                 "case_type": FieldMapping(source_name="v2_cas_type"),
-                "severity": FieldMapping(source_name="v2_sev"),
+                "severity": FieldMapping(source_name="v2_cas_sev", vocabulary=SEVERITY_SRC_E),
                 "created_at_utc": FieldMapping(source_name="v2_cre_at_utc"),
             },
             "case_alert_link": {
@@ -697,6 +731,9 @@ def get_src_e() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="v2_cas_id"),
                 "alert_id": FieldMapping(source_name="v2_ale_id"),
                 "started_at_utc": FieldMapping(source_name="v2_sta_at_utc"),
+                "disposition": FieldMapping(
+                    source_name="v2_inv_disp", vocabulary=DISPOSITION_SRC_E
+                ),
             },
             "escalation": {
                 "escalation_id": FieldMapping(source_name="v2_esc_id", is_native_id=True),
@@ -719,6 +756,9 @@ def get_src_e() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="v2_cas_id"),
                 "alert_id": FieldMapping(source_name="v2_ale_id"),
                 "resolved_at_utc": FieldMapping(source_name="v2_res_at_utc"),
+                "resolution_type": FieldMapping(
+                    source_name="v2_res_type", vocabulary=DISPOSITION_SRC_E
+                ),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="v2_clo_id", is_native_id=True),
@@ -727,6 +767,9 @@ def get_src_e() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="v2_ale_id"),
                 "resolution_id": FieldMapping(source_name="v2_res_id"),
                 "closed_at_utc": FieldMapping(source_name="v2_clo_at_utc"),
+                "disposition": FieldMapping(
+                    source_name="v2_clo_disp", vocabulary=DISPOSITION_SRC_E
+                ),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="v2_exc_id", is_native_id=True),

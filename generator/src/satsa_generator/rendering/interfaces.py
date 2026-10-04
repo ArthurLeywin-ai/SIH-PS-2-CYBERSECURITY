@@ -9,8 +9,8 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
 
-from satsa_generator.canonical.oracle import CanonicalOracle
 from satsa_generator.fixture.models import FixtureRecord
 from satsa_generator.profiles.models import ProfileDefinition
 from satsa_generator.provenance.models import (
@@ -29,7 +29,12 @@ class RenderContext:
     indexes: list[SourceRecordIndex] = field(default_factory=list)
     field_provenance: list[FieldProvenance] = field(default_factory=list)
     relationship_provenance: list[RelationshipProvenance] = field(default_factory=list)
-    oracle: CanonicalOracle | None = None
+    # Relationship records for deriving source relationships (e.g., CaseAlertLinkRecord)
+    relationship_records: list[FixtureRecord] = field(default_factory=list)
+    # Key fields for joining relationship records
+    relationship_subject_field: str | None = None
+    relationship_object_field: str | None = None
+    relationship_target_field: str | None = None
 
 
 class BaseRenderer(abc.ABC):
@@ -44,6 +49,44 @@ class BaseRenderer(abc.ABC):
     ) -> bytes:
         """Render a list of records to bytes."""
         pass
+
+    def get_relationships_for_record(
+        self,
+        canonical_id: UUID,
+        family: str,
+        context: RenderContext,
+    ) -> dict[str, UUID | list[UUID]]:
+        """Derive relationships for a record from operational relationship records."""
+        if not context.relationship_records:
+            return {}
+
+        subject_field = context.relationship_subject_field
+        object_field = context.relationship_object_field
+        target_field = context.relationship_target_field
+
+        if not subject_field or not object_field or not target_field:
+            return {}
+
+        rels = {}
+        for rel_record in context.relationship_records:
+            rel_dict = rel_record.model_dump()
+            subject_id = rel_dict.get(subject_field)
+            # object_field is part of the join condition but not used in this impl
+
+            if subject_id == canonical_id:
+                target_id = rel_dict.get(target_field)
+                if target_id:
+                    # Handle list relationships - always use plural form as key
+                    # and always store as list for consistency with oracle
+                    key = (
+                        target_field.replace("_id", "s")
+                        if target_field.endswith("_id")
+                        else target_field
+                    )
+                    if key not in rels:
+                        rels[key] = []
+                    rels[key].append(target_id)
+        return rels
 
     def apply_field_mapping(
         self,

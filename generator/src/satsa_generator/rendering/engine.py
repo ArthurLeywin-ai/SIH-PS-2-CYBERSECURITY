@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from satsa_generator.canonical.oracle import CanonicalOracle
 from satsa_generator.fixture.models import FixtureRecord
 from satsa_generator.profiles.models import ProfileDefinition
 from satsa_generator.provenance.models import (
@@ -34,10 +33,9 @@ class RenderResult:
 class RenderingEngine:
     """Coordinates rendering of canonical records into source files."""
 
-    def __init__(self, output_root: Path, profile: ProfileDefinition, oracle: CanonicalOracle):
+    def __init__(self, output_root: Path, profile: ProfileDefinition):
         self.output_root = output_root
         self.profile = profile
-        self.oracle = oracle
         self.indexes: list[SourceRecordIndex] = []
         self.field_provenance: list[FieldProvenance] = []
         self.relationship_provenance: list[RelationshipProvenance] = []
@@ -54,7 +52,15 @@ class RenderingEngine:
         else:
             raise ValueError(f"Unsupported format: {profile.format}")
 
-    def render_and_write(self, family: str, records: list[FixtureRecord]) -> dict[str, Any] | None:
+    def render_and_write(
+        self,
+        family: str,
+        records: list[FixtureRecord],
+        relationship_records: list[FixtureRecord] | None = None,
+        relationship_subject_field: str | None = None,
+        relationship_object_field: str | None = None,
+        relationship_target_field: str | None = None,
+    ) -> dict[str, Any] | None:
         """Render records for a given family and write to disk."""
         if not records:
             return None
@@ -66,7 +72,10 @@ class RenderingEngine:
         context = RenderContext(
             profile=self.profile,
             output_path=relative_path,
-            oracle=self.oracle,
+            relationship_records=relationship_records or [],
+            relationship_subject_field=relationship_subject_field,
+            relationship_object_field=relationship_object_field,
+            relationship_target_field=relationship_target_field,
         )
 
         content = self.renderer.render_records(family, records, context)
@@ -85,9 +94,8 @@ class RenderingEngine:
         }
 
     def get_provenance_hash(self) -> str:
-        """Deterministically hash the provenance and oracle."""
+        """Deterministically hash the provenance."""
         combined = {
-            "oracle": self.oracle.calculate_oracle_hash(),
             "indexes": sorted(
                 [idx.model_dump(mode="json") for idx in self.indexes],
                 key=lambda x: x["source_record_locator"],
@@ -105,12 +113,8 @@ class RenderingEngine:
         return hashlib.sha256(content).hexdigest()
 
     def write_metadata(self, base_path: Path, prefix: str) -> str:
-        """Write oracle, index, and provenance metadata."""
+        """Write index and provenance metadata."""
         base_path.mkdir(parents=True, exist_ok=True)
-
-        oracle_path = base_path / f"{prefix}_oracle.json"
-        oracle_data = [r.model_dump(mode="json") for r in self.oracle.expected_records.values()]
-        oracle_path.write_text(json.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8")
 
         index_path = base_path / f"{prefix}_index.json"
         index_data = [idx.model_dump(mode="json") for idx in self.indexes]
