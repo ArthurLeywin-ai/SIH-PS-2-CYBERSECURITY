@@ -137,7 +137,7 @@ generator/
 
 ## Current Status
 
-**Milestone 2 (Small Schema-Valid Base World) implemented and tested.**
+**Milestone 3 (Source Profiles, Canonical Oracle, and Provenance) implemented and tested.**
 
 Implemented:
 
@@ -145,13 +145,13 @@ Implemented:
 - Base-world generation logic populating operational entities across organizations, periods, assets, coverages, alerts, cases, triage investigations, escalations, remediation actions, resolutions, closures, exceptions, and process changes;
 - Comprehensive referential integrity validator (`validate_m2_fixture_records`);
 - Temporal ordering validator enforcing causal lifecycle consistency;
+- Source renderers framework (SRC-A through SRC-E contracts) with CSV and JSON implementations;
+- Canonical oracle and provenance logic for field-level mapping round-trips;
 - Offline, byte-identical deterministic serialization with SHA-256 manifest and tree hash;
-- Comprehensive test suite (51 passing unit, contract, integration, temporal, and reproducibility tests).
+- Comprehensive test suite (55 passing unit, contract, integration, temporal, and reproducibility tests).
 
-Intentionally not implemented yet (Milestone 3+ scope):
+Intentionally not implemented yet (Milestone 4+ scope):
 
-- Source renderers (SRC-A through SRC-E CSV/JSON format exporters);
-- Canonical oracle and provenance graph;
 - Scenarios, legitimate controls, or data-quality mutations (M4);
 - Hidden ground-truth and evaluation answer key packages (M4);
 - Full multi-organization large-scale dataset generation.

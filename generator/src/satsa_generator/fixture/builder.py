@@ -106,10 +106,12 @@ def build_fixture(
     master_seed: bytes,
     *,
     output_root: Path | None = None,
-    milestone: Literal["m1", "m2"] = "m1",
+    milestone: Literal["m1", "m2", "m3"] = "m1",
 ) -> FixtureBuildResult:
     """Build a deterministic fixture without truth or scenario metadata."""
-    if milestone == "m2":
+    if milestone == "m3":
+        return _build_m3_fixture_internal(config_path, master_seed, output_root=output_root)
+    elif milestone == "m2":
         return _build_m2_fixture_internal(config_path, master_seed, output_root=output_root)
     return _build_m1_fixture_internal(config_path, master_seed, output_root=output_root)
 
@@ -122,6 +124,16 @@ def build_m2_fixture(
 ) -> FixtureBuildResult:
     """Convenience function to build Milestone 2 small base-world fixture."""
     return build_fixture(config_path, master_seed, output_root=output_root, milestone="m2")
+
+
+def build_m3_fixture(
+    config_path: Path,
+    master_seed: bytes,
+    *,
+    output_root: Path | None = None,
+) -> FixtureBuildResult:
+    """Convenience function to build Milestone 3 source rendering fixture."""
+    return build_fixture(config_path, master_seed, output_root=output_root, milestone="m3")
 
 
 def _build_m1_fixture_internal(
@@ -326,6 +338,201 @@ def _build_m2_fixture_internal(
     return FixtureBuildResult(
         output_root=root,
         operational_root=operational_root,
+        manifest_path=manifest_path,
+        tree_sha256=tree_sha256,
+        record_counts=record_counts,
+    )
+
+
+def _build_m3_fixture_internal(
+    config_path: Path,
+    master_seed: bytes,
+    *,
+    output_root: Path | None = None,
+) -> FixtureBuildResult:
+    config = load_config(config_path)
+    if config.tier.value != "deterministic_fixture":
+        raise FixtureBuildError(
+            "The Milestone 3 fixture builder only accepts tier=deterministic_fixture."
+        )
+
+    root = output_root if output_root is not None else Path(config.output_root)
+    root = root.expanduser()
+    _require_empty_output_root(root)
+
+    source_exports_root = root / "source_exports"
+    oracle_root = root / "canonical_reference"
+
+    seeds = SeedManager(master_seed)
+    ids = IDService(config.dataset_namespace)
+
+    records = _generate_m2_records(config, seeds, ids)
+    validate_m2_fixture_records(*records)
+
+    (
+        organizations,
+        submissions,
+        submission_manifests,
+        submission_families,
+        control_refs,
+        control_links,
+        assets,
+        coverages,
+        alerts,
+        cases,
+        case_alert_links,
+        investigations,
+        escalations,
+        actions,
+        resolutions,
+        closures,
+        exceptions,
+        process_changes,
+    ) = records
+
+    context = _make_context(
+        config, root, seeds.private_ledger_hash(), contract="SATSA-M3-FIXTURE-V1"
+    )
+
+    from satsa_generator.profiles.catalog import get_profile
+    from satsa_generator.rendering.engine import RenderingEngine
+
+    # We will simulate heterogeneous sources by assigning different records to different profiles
+    # For now, let's use SRC-A for most, SRC-C for cases, etc. to demonstrate heterogeneity
+    profile_a = get_profile("SRC-A")
+    profile_b = get_profile("SRC-B")
+    profile_c = get_profile("SRC-C")
+
+    # M3 specifically mandates mapping M2 canonical records into heterogeneous rendered output files
+    engine_a = RenderingEngine(source_exports_root, profile_a)
+    engine_b = RenderingEngine(source_exports_root, profile_b)
+    engine_c = RenderingEngine(source_exports_root, profile_c)
+
+    file_manifests = []
+
+    # We distribute records across engines based on simulated data source profiles
+    f_org = engine_a.render_and_write("organization", organizations)
+    if f_org:
+        file_manifests.append(f_org)
+
+    f_sub = engine_b.render_and_write("submission", submissions)
+    if f_sub:
+        file_manifests.append(f_sub)
+
+    f_man = engine_a.render_and_write("submission_manifest", submission_manifests)
+    if f_man:
+        file_manifests.append(f_man)
+
+    f_fam = engine_b.render_and_write("submission_family", submission_families)
+    if f_fam:
+        file_manifests.append(f_fam)
+
+    f_cr = engine_c.render_and_write("control_process_reference", control_refs)
+    if f_cr:
+        file_manifests.append(f_cr)
+
+    f_cl = engine_c.render_and_write("control_process_subject_link", control_links)
+    if f_cl:
+        file_manifests.append(f_cl)
+
+    f_asset = engine_a.render_and_write("asset", assets)
+    if f_asset:
+        file_manifests.append(f_asset)
+
+    f_cov = engine_b.render_and_write("monitoring_coverage", coverages)
+    if f_cov:
+        file_manifests.append(f_cov)
+
+    f_al = engine_c.render_and_write("alert", alerts)
+    if f_al:
+        file_manifests.append(f_al)
+
+    f_ca = engine_c.render_and_write("case", cases)
+    if f_ca:
+        file_manifests.append(f_ca)
+
+    f_cal = engine_c.render_and_write("case_alert_link", case_alert_links)
+    if f_cal:
+        file_manifests.append(f_cal)
+
+    f_inv = engine_a.render_and_write("investigation", investigations)
+    if f_inv:
+        file_manifests.append(f_inv)
+
+    f_esc = engine_b.render_and_write("escalation", escalations)
+    if f_esc:
+        file_manifests.append(f_esc)
+
+    f_act = engine_c.render_and_write("action", actions)
+    if f_act:
+        file_manifests.append(f_act)
+
+    f_res = engine_a.render_and_write("resolution", resolutions)
+    if f_res:
+        file_manifests.append(f_res)
+
+    f_clo = engine_b.render_and_write("closure", closures)
+    if f_clo:
+        file_manifests.append(f_clo)
+
+    f_exc = engine_c.render_and_write("exception", exceptions)
+    if f_exc:
+        file_manifests.append(f_exc)
+
+    f_pc = engine_a.render_and_write("process_change", process_changes)
+    if f_pc:
+        file_manifests.append(f_pc)
+
+    # Write oracle
+    engine_a.write_oracle(oracle_root / "oracle_a.json")
+    engine_b.write_oracle(oracle_root / "oracle_b.json")
+    engine_c.write_oracle(oracle_root / "oracle_c.json")
+
+    record_counts = {
+        "organization": len(organizations),
+        "submission": len(submissions),
+        "submission_manifest": len(submission_manifests),
+        "submission_evidence_family": len(submission_families),
+        "control_process_reference": len(control_refs),
+        "control_process_subject_link": len(control_links),
+        "asset": len(assets),
+        "monitoring_coverage": len(coverages),
+        "alert": len(alerts),
+        "case": len(cases),
+        "case_alert_link": len(case_alert_links),
+        "investigation": len(investigations),
+        "escalation": len(escalations),
+        "action": len(actions),
+        "resolution": len(resolutions),
+        "closure": len(closures),
+        "exception": len(exceptions),
+        "process_change": len(process_changes),
+    }
+
+    manifest = FixtureManifest(
+        fixture_contract="SATSA-M2-FIXTURE-V1",  # Assuming M2 schema still holds for counting
+        dataset_id=ids.generate("dataset", config.tier.value, config.split.value),
+        dataset_version=f"{config.generator_version}-m3-{context.version.sha256()[:12]}",
+        generator_version=config.generator_version,
+        generator_build_hash=context.version.generator_build_hash,
+        schema_version=config.schema_version,
+        config_sha256=context.config_hash,
+        version_tuple_sha256=context.version.sha256(),
+        seed_derivation_version=config.seed_derivation_version,
+        stream_fingerprints=seeds.public_ledger(),
+        created_at_utc=_deterministic_build_time(config),
+        record_counts=record_counts,
+        files=file_manifests,
+    )
+
+    manifest_bytes = _serialize_object(manifest.model_dump(mode="json"))
+    manifest_path = source_exports_root / "fixture_manifest.json"
+    manifest_path.write_bytes(manifest_bytes)
+
+    tree_sha256 = _tree_hash(source_exports_root)
+    return FixtureBuildResult(
+        output_root=root,
+        operational_root=source_exports_root,
         manifest_path=manifest_path,
         tree_sha256=tree_sha256,
         record_counts=record_counts,
@@ -787,8 +994,7 @@ def validate_m2_fixture_records(
                 )
             if case.closed_at_utc and esc.escalated_at_utc > case.closed_at_utc:
                 raise TemporalIntegrityError(
-                    f"Escalation {esc.escalation_id} occurred after case "
-                    f"{case.case_id} was closed."
+                    f"Escalation {esc.escalation_id} occurred after case {case.case_id} was closed."
                 )
 
     for act in actions:
@@ -796,8 +1002,7 @@ def validate_m2_fixture_records(
             case = case_map[act.case_id]
             if act.created_at_utc < case.created_at_utc:
                 raise TemporalIntegrityError(
-                    f"Action {act.action_id} was created before case "
-                    f"{case.case_id} was created."
+                    f"Action {act.action_id} was created before case {case.case_id} was created."
                 )
 
     for res in resolutions:
@@ -814,15 +1019,13 @@ def validate_m2_fixture_records(
             case = case_map[clo.case_id]
             if clo.closed_at_utc < case.created_at_utc:
                 raise TemporalIntegrityError(
-                    f"Closure {clo.closure_id} occurred before case "
-                    f"{case.case_id} was created."
+                    f"Closure {clo.closure_id} occurred before case {case.case_id} was created."
                 )
         if clo.resolution_id is not None:
             res = res_map[clo.resolution_id]
             if clo.closed_at_utc < res.resolved_at_utc:
                 raise TemporalIntegrityError(
-                    f"Closure {clo.closure_id} occurred before resolution "
-                    f"{res.resolution_id}."
+                    f"Closure {clo.closure_id} occurred before resolution {res.resolution_id}."
                 )
 
     for sub in submissions:
@@ -1511,8 +1714,7 @@ def _generate_m2_records(
                         owner_role_code="SECOPS_ENGINEER",
                         remediation_reference=f"REM-{case.source_case_id}",
                         action_summary=(
-                            f"Contained anomalous activity on "
-                            f"{c_alerts[0].alert_category} subject."
+                            f"Contained anomalous activity on {c_alerts[0].alert_category} subject."
                         ),
                         verification_state="VERIFIED",
                         workflow_version="wf-v1",

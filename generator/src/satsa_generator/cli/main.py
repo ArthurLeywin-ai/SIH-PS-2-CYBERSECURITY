@@ -90,9 +90,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
     fixture_parser.add_argument(
         "--milestone",
-        choices=["m1", "m2"],
+        choices=["m1", "m2", "m3"],
         default="m2",
-        help="Milestone fixture target (m1 or m2, default: m2).",
+        help="Milestone fixture target (m1, m2, m3, default: m2).",
     )
     fixture_parser.add_argument(
         "--seed",
@@ -181,8 +181,10 @@ def cmd_build_fixture(args: argparse.Namespace) -> int:
         )
         if milestone == "m1":
             print("✓ Milestone 1 foundation fixture built.")
-        else:
+        elif milestone == "m2":
             print("✓ M2 small development/base-world fixture built.")
+        elif milestone == "m3":
+            print("✓ M3 source profiles and canonical oracle generated.")
         print(f"  Operational root: {result.operational_root}")
         print(f"  Tree SHA-256: {result.tree_sha256}")
         print(f"  Records: {result.record_counts}")
