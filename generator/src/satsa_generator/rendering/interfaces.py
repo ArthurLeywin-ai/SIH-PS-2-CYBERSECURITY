@@ -165,4 +165,26 @@ class BaseRenderer(abc.ABC):
             elif mapping.vocabulary.on_unknown == "fail":
                 raise ValueError(f"Unmapped vocabulary value: {source_val}")
 
+        if context.profile.id_namespace and source_val is not None:
+            if isinstance(source_val, list):
+                new_list = []
+                for item in source_val:
+                    try:
+                        u = UUID(str(item))
+                        new_list.append(f"{context.profile.id_namespace}-ALERT-{u}")
+                    except (ValueError, TypeError):
+                        new_list.append(item)
+                source_val = new_list
+            elif not canonical_field.startswith("source_") and (
+                canonical_field.endswith("_id") or (mapping and mapping.is_native_id)
+            ):
+                try:
+                    u = UUID(str(source_val))
+                    token = canonical_field.replace("_id", "").upper()
+                    if token in ("ID", ""):
+                        token = family.upper()
+                    source_val = f"{context.profile.id_namespace}-{token}-{u}"
+                except (ValueError, TypeError):
+                    pass
+
         return source_name, source_val, path

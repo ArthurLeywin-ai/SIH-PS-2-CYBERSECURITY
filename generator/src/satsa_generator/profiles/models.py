@@ -66,6 +66,11 @@ class ProfileDefinition(BaseModel):
     # Whether child IDs or relationships are nested
     relationships_nested: bool = False
 
+    # Namespace for source identifiers (e.g., "E1", "E2" for SRC-E migration periods)
+    id_namespace: str | None = None
+    # JSON mode for JSON profiles: "array" (default) or "lines" (JSONL)
+    json_mode: Literal["array", "lines"] = "array"
+
     # Maps canonical evidence family (e.g., "case", "alert") to its field mappings
     family_mappings: dict[str, dict[str, FieldMapping]] = Field(default_factory=dict)
 

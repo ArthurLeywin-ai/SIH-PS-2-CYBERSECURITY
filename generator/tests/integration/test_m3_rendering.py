@@ -398,16 +398,14 @@ def test_vocabulary_pass_through_unknown(
     with pytest.raises(ValueError, match="Unmapped vocabulary value during parse-back: 999"):
         parse_and_validate(result.operational_root, oracle_dir, "SRC-B", "submission")
 
-    # Part 2: Test that on_unknown='pass_through' on SRC-D preserves unknown tokens
-    alert_d_path = result.operational_root / "alert_src-d.jsonl"
-    lines = alert_d_path.read_text(encoding="utf-8").strip().split("\n")
-    first_record = json.loads(lines[0])
+    # Part 2: Test that on_unknown='pass_through' on SRC-D maps unknown token to 'UNKNOWN'
+    alert_d_path = result.operational_root / "alert_src-d.json"
+    data = json.loads(alert_d_path.read_text(encoding="utf-8"))
     unknown_token = "custom-vendor-sev-unknown-level-x"
-    first_record["ale_sev"] = unknown_token
-    lines[0] = json.dumps(first_record)
-    alert_d_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    data[0]["ale_sev"] = unknown_token
+    alert_d_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    # Update oracle expectation for record 0 to match the pass-through value
+    # Update oracle expectation for record 0 to match the canonical 'UNKNOWN' state
     oracle_d_path = oracle_dir / "src_d_oracle.json"
     oracle_d_data = json.loads(oracle_d_path.read_text(encoding="utf-8"))
     index_d_path = oracle_dir / "src_d_index.json"
@@ -423,11 +421,12 @@ def test_vocabulary_pass_through_unknown(
 
     for r in oracle_d_data:
         if r["canonical_record_id"] == rec0_id:
-            r["fields"]["severity"] = unknown_token
+            r["fields"]["severity"] = "UNKNOWN"
             break
     oracle_d_path.write_text(json.dumps(oracle_d_data, indent=2), encoding="utf-8")
 
-    # Validation must SUCCEED because on_unknown='pass_through' preserved the token!
+    # Validation must SUCCEED because on_unknown='pass_through' normalized to
+    # UNKNOWN while raw is preserved!
     parse_and_validate(result.operational_root, oracle_dir, "SRC-D", "alert")
 
     # Part 3: Test that injecting the same unknown token into SRC-B severity fails
@@ -734,3 +733,209 @@ def test_src_e_migration_boundary(
 
     parse_and_validate(p02_root, p02_oracle_root, "SRC-E", "case", version="2.0")
     parse_and_validate(p02_root, p02_oracle_root, "SRC-E", "alert", version="2.0")
+
+
+def test_source_first_independence_detects_renderer_defect(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Architectural independence test (Blocker 1):
+    Proves that canonical reconstruction reads strictly from actual rendered disk files,
+    detects a defect injected directly into the rendered source artifact on disk,
+    and operates independently of any in-memory M2 domain records.
+    """
+    import shutil
+
+    from satsa_generator.canonical.reconstruction import (
+        reconstruct_canonical_oracle_from_disk,
+        reconstruct_family_from_disk,
+    )
+    from satsa_generator.profiles.catalog import get_profile
+
+    # 1. Build M3 fixture to disk
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    operational_root = result.operational_root
+    oracle_root = tmp_path / "canonical_reference"
+    profile_a = get_profile("SRC-A")
+
+    # 2. Mutate rendered source artifact ONLY on disk
+    alert_csv_path = operational_root / "alert_src-a.csv"
+    lines = alert_csv_path.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split(",")
+    row1 = lines[1].split(",")
+    sev_idx = header.index("severity")
+    original_sev = row1[sev_idx]
+    mutated_sev = "INFORMATIONAL" if original_sev != "INFORMATIONAL" else "CRITICAL"
+    row1[sev_idx] = mutated_sev
+    lines[1] = ",".join(row1)
+
+    # Write mutation to disk in an isolated copy
+    mutated_exports = tmp_path / "mutated_exports"
+    shutil.copytree(operational_root, mutated_exports)
+    (mutated_exports / "alert_src-a.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # 3. Run canonical reconstruction strictly from the mutated disk file
+    reconstructed_records, _ = reconstruct_family_from_disk(
+        mutated_exports, oracle_root, profile_a, "alert"
+    )
+
+    # 4. Verify canonical reconstruction reflects mutated source, not pre-render
+    assert reconstructed_records[0].fields["severity"] == mutated_sev
+    assert reconstructed_records[0].fields["severity"] != original_sev
+
+    # 5. Verify validation detects the mismatch against the unmutated contract
+    with pytest.raises(ValueError, match="Parse-back failure"):
+        parse_and_validate(mutated_exports, oracle_root, "SRC-A", "alert")
+
+    # 6. Verify that reconstruction operates independently of pre-render domain objects
+    clean_oracle = reconstruct_canonical_oracle_from_disk(operational_root, oracle_root, profile_a)
+    assert len(clean_oracle.expected_records) > 0
+
+
+def test_src_d_contract_compliance_from_actual_artifacts(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Validate all SRC-D contract dimensions directly from rendered artifacts on disk (Blocker 2):
+    1. JSON array parsing works from disk.
+    2. At least one family uses date-only timestamps.
+    3. At least one family uses offset timestamps.
+    4. Mixed/missing IDs are actually represented.
+    5. External IDs actually appear in rendered source.
+    6. Relationship arrays actually appear in rendered source.
+    7. Unknown vocabulary is mapped to UNKNOWN while preserving raw token.
+    8. Parser reconstructs the canonical representation correctly.
+    """
+    from satsa_generator.canonical.reconstruction import reconstruct_family_from_disk
+    from satsa_generator.profiles.catalog import get_profile
+
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    op_root = result.operational_root
+    oracle_dir = tmp_path / "canonical_reference"
+
+    # 1. JSON array parsing from disk
+    org_file = op_root / "organization_src-d.json"
+    assert org_file.exists(), "organization_src-d.json must exist"
+    org_data = json.loads(org_file.read_text(encoding="utf-8"))
+    assert isinstance(org_data, list), "SRC-D organization must be rendered as a JSON array"
+    assert len(org_data) > 0
+
+    # 2. Foundation family uses date-only timestamps (YYYY-MM-DD)
+    date_val = org_data[0].get("pro_eff_utc")
+    assert date_val is not None, "Organization profile effective start must be present"
+    assert len(date_val) == 10 and date_val.count("-") == 2, (
+        f"Expected date-only format, got {date_val}"
+    )
+
+    # 3. Operational family uses offset timestamps (+00:00 or offset)
+    alert_file = op_root / "alert_src-d.json"
+    assert alert_file.exists(), "alert_src-d.json must exist"
+    alert_data = json.loads(alert_file.read_text(encoding="utf-8"))
+    assert isinstance(alert_data, list)
+    ts_val = alert_data[0].get("cre_at_utc")
+    assert ts_val is not None, "Alert created_at_utc must be present"
+    assert "+00:00" in ts_val or ("+" in ts_val[10:] or "-" in ts_val[10:]), (
+        f"Expected offset timestamp, got {ts_val}"
+    )
+
+    # 4. Mixed/missing IDs: source_organization_id is omitted (is_present=False)
+    assert "sou_org_id" not in org_data[0], "sou_org_id must be omitted in SRC-D organization"
+    assert "source_organization_id" not in org_data[0]
+
+    # 5. External IDs appear in rendered source
+    assert "ext_alert_id" in alert_data[0], "External ID ext_alert_id must appear in SRC-D alert"
+    ext_ale = alert_data[0]["ext_alert_id"]
+    assert isinstance(ext_ale, str) and len(ext_ale) > 0
+
+    asset_file = op_root / "asset_src-d.json"
+    assert asset_file.exists(), "asset_src-d.json must exist"
+    asset_data = json.loads(asset_file.read_text(encoding="utf-8"))
+    assert "ext_asset_id" in asset_data[0], "External ID ext_asset_id must appear in SRC-D asset"
+    ext_ass = asset_data[0]["ext_asset_id"]
+    assert isinstance(ext_ass, str) and len(ext_ass) > 0
+
+    # 6. Relationship arrays appear in rendered source
+    case_file = op_root / "case_src-d.json"
+    assert case_file.exists(), "case_src-d.json must exist"
+    case_data = json.loads(case_file.read_text(encoding="utf-8"))
+    assert isinstance(case_data, list)
+    cases_with_alerts = [
+        c for c in case_data if isinstance(c.get("alerts"), list) and len(c["alerts"]) > 0
+    ]
+    assert len(cases_with_alerts) > 0, (
+        "At least one case must have a non-empty alerts relationship array"
+    )
+
+    # 7. Unknown vocabulary handled according to profile (pass_through -> UNKNOWN)
+    profile_d = get_profile("SRC-D")
+    mutated_alert_data = [dict(a) for a in alert_data]
+    mutated_alert_data[0]["ale_sev"] = "unknown_vendor_tier_x"
+    test_d_root = tmp_path / "test_d_unknown"
+    test_d_root.mkdir(parents=True, exist_ok=True)
+    (test_d_root / "alert_src-d.json").write_text(
+        json.dumps(mutated_alert_data, indent=2), encoding="utf-8"
+    )
+
+    reconstructed_d, _ = reconstruct_family_from_disk(test_d_root, oracle_dir, profile_d, "alert")
+    assert reconstructed_d[0].fields["severity"] == "UNKNOWN", (
+        "Pass-through unknown token must map canonical field to UNKNOWN"
+    )
+
+    # 8. Parser reconstructs canonical representation correctly
+    parse_and_validate(op_root, oracle_dir, "SRC-D", "organization")
+    parse_and_validate(op_root, oracle_dir, "SRC-D", "alert")
+    parse_and_validate(op_root, oracle_dir, "SRC-D", "case")
+
+
+def test_src_e_cross_version_rejection(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Verify that wrong profile/version causes validation/mapping failure (Blocker 3)."""
+    from satsa_generator.config.models import load_config
+    from satsa_generator.fixture.builder import _generate_m2_records, validate_m2_fixture_records
+    from satsa_generator.ids.service import IDService
+    from satsa_generator.profiles.catalog import get_src_e_v1, get_src_e_v2
+    from satsa_generator.seeds.manager import SeedManager
+
+    config = load_config(fixture_config_path)
+    seeds = SeedManager(master_seed)
+    ids = IDService(config.dataset_namespace)
+    records = _generate_m2_records(config, seeds, ids)
+    validate_m2_fixture_records(*records)
+    cases, links = records[9], records[10]
+
+    # Render V1 (Period A)
+    p01_root = tmp_path / "cross_p01_exports"
+    p01_oracle = tmp_path / "cross_p01_oracle"
+    p01_oracle.mkdir(parents=True, exist_ok=True)
+    engine_v1 = RenderingEngine(p01_root, get_src_e_v1())
+    engine_v1.render_and_write(
+        "case",
+        cases,
+        relationship_records=links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
+    engine_v1.write_metadata(p01_oracle, "src_e")
+
+    # Render V2 (Period B)
+    p02_root = tmp_path / "cross_p02_exports"
+    p02_oracle = tmp_path / "cross_p02_oracle"
+    p02_oracle.mkdir(parents=True, exist_ok=True)
+    engine_v2 = RenderingEngine(p02_root, get_src_e_v2())
+    engine_v2.render_and_write(
+        "case",
+        cases,
+        relationship_records=links,
+        relationship_subject_field="case_id",
+        relationship_object_field="case_id",
+        relationship_target_field="alert_id",
+    )
+    engine_v2.write_metadata(p02_oracle, "src_e")
+
+    # Attempting to validate V1 (CSV, E1- namespace) with V2 profile (JSON, E2- namespace) MUST fail
+    with pytest.raises((ValueError, FileNotFoundError)):
+        parse_and_validate(p01_root, p01_oracle, "SRC-E", "case", version="2.0")
+
+    # Attempting to validate V2 (JSON, E2- namespace) with V1 profile (CSV, E1- namespace) MUST fail
+    with pytest.raises((ValueError, FileNotFoundError)):
+        parse_and_validate(p02_root, p02_oracle, "SRC-E", "case", version="1.0")

@@ -62,11 +62,13 @@ class CSVRenderer(BaseRenderer):
                     record_dict[r_k] = str(r_v)
 
             family_map = context.profile.family_mappings.get(family, {})
-            for f_name, f_map in family_map.items():
-                if f_map.is_present and f_name not in record_dict:
-                    record_dict[f_name] = f_map.default_if_missing
+            fields_to_render = list(family_map.keys()) if family_map else list(record_dict.keys())
 
-            for canonical_field, canonical_value in record_dict.items():
+            for canonical_field in fields_to_render:
+                canonical_value = record_dict.get(canonical_field)
+                if canonical_value is None and canonical_field in family_map:
+                    canonical_value = family_map[canonical_field].default_if_missing
+
                 mapped = self.apply_field_mapping(canonical_field, canonical_value, family, context)
                 if mapped:
                     source_name, source_value, _ = mapped

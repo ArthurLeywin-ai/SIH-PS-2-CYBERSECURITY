@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from satsa_generator.profiles.models import FieldMapping, ProfileDefinition
+from typing import Literal
+
+from satsa_generator.profiles.models import FieldMapping, FormatType, ProfileDefinition
 from satsa_generator.profiles.vocabulary import (
     CATEGORY_SRC_D,
     CATEGORY_SRC_E_V1,
@@ -98,6 +100,7 @@ def get_src_a() -> ProfileDefinition:
             },
             "alert": {
                 "alert_id": FieldMapping(source_name="alert_id", is_native_id=True),
+                "source_alert_id": FieldMapping(source_name="source_alert_id"),
                 "organization_id": FieldMapping(source_name="organization_id"),
                 "asset_id": FieldMapping(source_name="asset_id"),
                 "created_at_utc": FieldMapping(source_name="created_at_utc"),
@@ -151,6 +154,7 @@ def get_src_a() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="case_id"),
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "resolved_at_utc": FieldMapping(source_name="resolved_at_utc"),
+                "resolution_type": FieldMapping(source_name="resolution_type"),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="closure_id", is_native_id=True),
@@ -159,6 +163,8 @@ def get_src_a() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "resolution_id": FieldMapping(source_name="resolution_id"),
                 "closed_at_utc": FieldMapping(source_name="closed_at_utc"),
+                "closure_status": FieldMapping(source_name="closure_status"),
+                "disposition": FieldMapping(source_name="disposition"),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="exception_id", is_native_id=True),
@@ -251,6 +257,7 @@ def get_src_b() -> ProfileDefinition:
             },
             "alert": {
                 "alert_id": FieldMapping(source_name="AlertId", is_native_id=True),
+                "source_alert_id": FieldMapping(source_name="SourceAlertId"),
                 "organization_id": FieldMapping(source_name="OrganizationId"),
                 "asset_id": FieldMapping(source_name="AssetId"),
                 "created_at_utc": FieldMapping(source_name="CreatedAtUtc"),
@@ -304,6 +311,7 @@ def get_src_b() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="CaseId"),
                 "alert_id": FieldMapping(source_name="AlertId"),
                 "resolved_at_utc": FieldMapping(source_name="ResolvedAtUtc"),
+                "resolution_type": FieldMapping(source_name="ResolutionType"),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="ClosureId", is_native_id=True),
@@ -312,6 +320,8 @@ def get_src_b() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="AlertId"),
                 "resolution_id": FieldMapping(source_name="ResolutionId"),
                 "closed_at_utc": FieldMapping(source_name="ClosedAtUtc"),
+                "closure_status": FieldMapping(source_name="ClosureStatus"),
+                "disposition": FieldMapping(source_name="Disposition"),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="ExceptionId", is_native_id=True),
@@ -426,6 +436,7 @@ def get_src_c() -> ProfileDefinition:
             },
             "alert": {
                 "alert_id": FieldMapping(source_name="alertId", is_native_id=True),
+                "source_alert_id": FieldMapping(source_name="sourceAlertId"),
                 "organization_id": FieldMapping(source_name="organizationId"),
                 "asset_id": FieldMapping(source_name="assetId"),
                 "created_at_utc": FieldMapping(
@@ -499,6 +510,9 @@ def get_src_c() -> ProfileDefinition:
                 "resolved_at_utc": FieldMapping(
                     source_name="resolvedAtUtc", path=["details", "resolvedAtUtc"]
                 ),
+                "resolution_type": FieldMapping(
+                    source_name="resolutionType", path=["details", "resolutionType"]
+                ),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="closureId", is_native_id=True),
@@ -508,6 +522,12 @@ def get_src_c() -> ProfileDefinition:
                 "resolution_id": FieldMapping(source_name="resolutionId"),
                 "closed_at_utc": FieldMapping(
                     source_name="closedAtUtc", path=["details", "closedAtUtc"]
+                ),
+                "closure_status": FieldMapping(
+                    source_name="closureStatus", path=["details", "closureStatus"]
+                ),
+                "disposition": FieldMapping(
+                    source_name="disposition", path=["details", "disposition"]
                 ),
             },
             "exception": {
@@ -528,10 +548,12 @@ def get_src_c() -> ProfileDefinition:
     )
 
 
-def get_src_d() -> ProfileDefinition:
+def get_src_d(json_mode: Literal["array", "lines"] = "array") -> ProfileDefinition:
+    fmt: FormatType = "JSON" if json_mode == "array" else "JSONL"
     return ProfileDefinition(
         profile_id="SRC-D",
-        format="JSONL",
+        format=fmt,
+        json_mode=json_mode,
         timestamp_format="date_only",
         case_naming="mixed",
         per_family_timestamp_format={
@@ -600,7 +622,7 @@ def get_src_d() -> ProfileDefinition:
             },
             "asset": {
                 "asset_id": FieldMapping(source_name="ass_id", is_native_id=True),
-                "source_asset_id": FieldMapping(source_name="sou_ass_id"),
+                "source_asset_id": FieldMapping(source_name="ext_asset_id"),
                 "organization_id": FieldMapping(source_name="org_id"),
                 "asset_class": FieldMapping(source_name="ass_class"),
             },
@@ -612,6 +634,7 @@ def get_src_d() -> ProfileDefinition:
             },
             "alert": {
                 "alert_id": FieldMapping(source_name="ale_id", is_native_id=True),
+                "source_alert_id": FieldMapping(source_name="ext_alert_id"),
                 "organization_id": FieldMapping(source_name="org_id"),
                 "asset_id": FieldMapping(source_name="ass_id"),
                 "created_at_utc": FieldMapping(source_name="cre_at_utc"),
@@ -663,6 +686,7 @@ def get_src_d() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="cas_id"),
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "resolved_at_utc": FieldMapping(source_name="res_at_utc"),
+                "resolution_type": FieldMapping(source_name="res_type"),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="clo_id", is_native_id=True),
@@ -671,6 +695,8 @@ def get_src_d() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "resolution_id": FieldMapping(source_name="res_id"),
                 "closed_at_utc": FieldMapping(source_name="clo_at_utc"),
+                "closure_status": FieldMapping(source_name="clo_status"),
+                "disposition": FieldMapping(source_name="clo_disp", vocabulary=DISPOSITION_SRC_D),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="exc_id", is_native_id=True),
@@ -690,6 +716,7 @@ def get_src_e_v1() -> ProfileDefinition:
     return ProfileDefinition(
         profile_id="SRC-E",
         version="1.0",
+        id_namespace="E1",
         format="CSV",
         timestamp_format="iso_z",
         case_naming="snake_case",
@@ -759,6 +786,7 @@ def get_src_e_v1() -> ProfileDefinition:
             },
             "alert": {
                 "alert_id": FieldMapping(source_name="alert_id", is_native_id=True),
+                "source_alert_id": FieldMapping(source_name="source_alert_id"),
                 "organization_id": FieldMapping(source_name="organization_id"),
                 "asset_id": FieldMapping(source_name="asset_id"),
                 "created_at_utc": FieldMapping(source_name="created_at_utc"),
@@ -818,6 +846,7 @@ def get_src_e_v1() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="case_id"),
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "resolved_at_utc": FieldMapping(source_name="resolved_at_utc"),
+                "resolution_type": FieldMapping(source_name="resolution_type"),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="closure_id", is_native_id=True),
@@ -826,6 +855,10 @@ def get_src_e_v1() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "resolution_id": FieldMapping(source_name="resolution_id"),
                 "closed_at_utc": FieldMapping(source_name="closed_at_utc"),
+                "closure_status": FieldMapping(source_name="closure_status"),
+                "disposition": FieldMapping(
+                    source_name="disposition", vocabulary=DISPOSITION_SRC_E_V1
+                ),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="exception_id", is_native_id=True),
@@ -847,6 +880,7 @@ def get_src_e_v2() -> ProfileDefinition:
     return ProfileDefinition(
         profile_id="SRC-E",
         version="2.0",
+        id_namespace="E2",
         format="CSV",
         timestamp_format="iso_offset_ms",
         case_naming="mixed",
@@ -932,6 +966,7 @@ def get_src_e_v2() -> ProfileDefinition:
             },
             "alert": {
                 "alert_id": FieldMapping(source_name="id", is_native_id=True),
+                "source_alert_id": FieldMapping(source_name="sou_id"),
                 "organization_id": FieldMapping(source_name="org_id"),
                 "asset_id": FieldMapping(source_name="target_asset_id"),
                 "created_at_utc": FieldMapping(source_name="timestamp_utc"),
@@ -987,6 +1022,7 @@ def get_src_e_v2() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="case_id"),
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "resolved_at_utc": FieldMapping(source_name="resolved_timestamp_utc"),
+                "resolution_type": FieldMapping(source_name="res_type"),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="closure_id", is_native_id=True),
@@ -995,6 +1031,8 @@ def get_src_e_v2() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "resolution_id": FieldMapping(source_name="resolution_id"),
                 "closed_at_utc": FieldMapping(source_name="closed_timestamp_utc"),
+                "closure_status": FieldMapping(source_name="clo_status"),
+                "disposition": FieldMapping(source_name="dis", vocabulary=DISPOSITION_SRC_E_V2),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="exception_id", is_native_id=True),

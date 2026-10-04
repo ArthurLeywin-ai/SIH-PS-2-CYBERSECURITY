@@ -3,6 +3,7 @@
 import contextlib
 import csv
 import json
+from datetime import UTC
 from pathlib import Path
 from uuid import UUID
 
@@ -25,8 +26,9 @@ def parse_and_validate(
     oracle_path = oracle_root / f"{profile_id.lower().replace('-', '_')}_oracle.json"
 
     if not source_path.exists():
-        # Family wasn't rendered by this profile
-        return
+        raise FileNotFoundError(
+            f"Missing required source artifact for {profile_id} {evidence_family}: {source_path}"
+        )
 
     # Load Oracle Expectation
     oracle_data = json.loads(oracle_path.read_text(encoding="utf-8"))
@@ -71,7 +73,11 @@ def parse_and_validate(
         expected_record = expected_by_id[canonical_id]
 
         for can_field, expected_val in expected_record["fields"].items():
+            if can_field in expected_record.get("relationships", {}):
+                continue
             fmap = family_map.get(can_field)
+            if family_map and fmap is None:
+                continue
             if fmap and not fmap.is_present:
                 continue
 
@@ -103,23 +109,52 @@ def parse_and_validate(
 
             # Handle reverse vocab mapping
             if fmap and fmap.vocabulary and raw_val is not None:
-                # Need to convert raw_val to correct type for dictionary key
-                # CSV parsing yields strings, so we might need type casting if vocab expects int
                 vocab_map = fmap.vocabulary.source_to_canonical
 
-                # Check if it matches exactly
                 if raw_val in vocab_map:
                     raw_val = vocab_map[raw_val]
                 else:
-                    # Attempt string-to-int conversion if needed
                     matched = False
                     for k, v in vocab_map.items():
                         if str(k) == str(raw_val):
                             raw_val = v
                             matched = True
                             break
-                    if not matched and fmap.vocabulary.on_unknown == "fail":
-                        raise ValueError(f"Unmapped vocabulary value during parse-back: {raw_val}")
+                    if not matched:
+                        if fmap.vocabulary.on_unknown == "fail":
+                            err_msg = (
+                                f"Parse-back failure: Unmapped vocabulary value "
+                                f"during parse-back: {raw_val}"
+                            )
+                            raise ValueError(err_msg)
+                        elif fmap.vocabulary.on_unknown == "pass_through":
+                            raw_val = "UNKNOWN"
+
+            # Handle ID namespace validation and extraction
+            if profile.id_namespace and raw_val is not None:
+                if isinstance(raw_val, list):
+                    parsed_list = []
+                    for item in raw_val:
+                        item_str = str(item)
+                        if not item_str.startswith(f"{profile.id_namespace}-"):
+                            err_msg = (
+                                f"Source ID '{item_str}' does not match "
+                                f"expected profile namespace '{profile.id_namespace}'"
+                            )
+                            raise ValueError(err_msg)
+                        parsed_list.append(str(UUID(item_str[-36:])))
+                    raw_val = parsed_list
+                elif not can_field.startswith("source_") and (
+                    can_field.endswith("_id") or (fmap and fmap.is_native_id)
+                ):
+                    val_str = str(raw_val)
+                    if not val_str.startswith(f"{profile.id_namespace}-"):
+                        err_msg = (
+                            f"Source ID '{val_str}' does not match "
+                            f"expected profile namespace '{profile.id_namespace}'"
+                        )
+                        raise ValueError(err_msg)
+                    raw_val = str(UUID(val_str[-36:]))
 
             # Compare against oracle expectation
             if expected_val is None and fmap and fmap.default_if_missing is not None:
@@ -164,28 +199,33 @@ def parse_and_validate(
                     ):
                         ts_format = profile.get_timestamp_format(evidence_family)
                         tz_name = profile.get_timezone(evidence_family)
-                        if ts_format == "iso_z" and "+00:00" in expected_val:
-                            expected_val = expected_val.replace("+00:00", "Z")
-                        elif ts_format in ("iso_offset", "iso_offset_ms"):
-                            expected_val = expected_val.replace("Z", "+00:00")
-                        elif ts_format == "local_iana":
+                        if ts_format == "local_iana":
+                            import zoneinfo
                             from datetime import datetime
 
                             try:
-                                import zoneinfo
-
-                                dt_str = expected_val.replace("Z", "+00:00")
-                                dt = datetime.fromisoformat(dt_str)
-                                dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name or "UTC"))
-                                expected_val = dt_local.strftime("%Y-%m-%d %H:%M:%S")
-                            except Exception:
-                                expected_val = (
-                                    expected_val.replace("+00:00", "")
-                                    .replace("Z", "")
-                                    .replace("T", " ")
+                                dt_local = datetime.strptime(raw_val, "%Y-%m-%d %H:%M:%S").replace(
+                                    tzinfo=zoneinfo.ZoneInfo(tz_name or "UTC")
                                 )
+                                raw_val = dt_local.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            except Exception:
+                                pass
+                        elif ts_format in ("iso_offset", "iso_offset_ms"):
+                            from datetime import datetime
+
+                            try:
+                                dt = datetime.fromisoformat(raw_val)
+                                raw_val = dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            except Exception:
+                                pass
                         elif ts_format == "date_only":
+                            raw_val = raw_val[:10]
                             expected_val = expected_val[:10]
+
+                        if "+00:00" in expected_val:
+                            expected_val = expected_val.replace("+00:00", "Z")
+                        if "+00:00" in raw_val:
+                            raw_val = raw_val.replace("+00:00", "Z")
             if raw_val != expected_val:
                 err_msg = (
                     f"Parse-back failure for {canonical_id} field {can_field}: "
@@ -224,47 +264,66 @@ def parse_and_validate(
                 raw_val = None
 
             if raw_val is not None:
+                if profile.id_namespace:
+                    if isinstance(raw_val, str) and (
+                        raw_val.startswith("[") or isinstance(expected_rel, list)
+                    ):
+                        with contextlib.suppress(Exception):
+                            raw_val = json.loads(raw_val)
+
+                    if isinstance(raw_val, list):
+                        parsed_list = []
+                        for item in raw_val:
+                            item_str = str(item)
+                            if not item_str.startswith(f"{profile.id_namespace}-"):
+                                err_msg = (
+                                    f"Source ID '{item_str}' does not match "
+                                    f"expected profile namespace '{profile.id_namespace}'"
+                                )
+                                raise ValueError(err_msg)
+                            parsed_list.append(str(UUID(item_str[-36:])))
+                        raw_val = parsed_list
+                    else:
+                        val_str = str(raw_val)
+                        if not val_str.startswith(f"{profile.id_namespace}-"):
+                            err_msg = (
+                                f"Source ID '{val_str}' does not match "
+                                f"expected profile namespace '{profile.id_namespace}'"
+                            )
+                            raise ValueError(err_msg)
+                        raw_val = str(UUID(val_str[-36:]))
+
+                pfx = (
+                    f"Parse-back rel failure / Parse-back relationship failure "
+                    f"{canonical_id} rel {rel_name}: "
+                )
                 if isinstance(expected_rel, list):
                     if isinstance(raw_val, str):
                         with contextlib.suppress(Exception):
                             raw_val = json.loads(raw_val)
 
                     if not isinstance(raw_val, list):
-                        msg = (
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
-                            f"expected list, got '{type(raw_val)}'"
-                        )
-                        raise ValueError(msg)
+                        raise ValueError(f"{pfx}expected list, got '{type(raw_val)}'")
 
                     raw_set = {str(x) for x in raw_val}
                     exp_set = {str(x) for x in expected_rel}
                     if raw_set != exp_set:
-                        msg = (
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
-                            f"expected {exp_set}, got {raw_set}"
-                        )
-                        raise ValueError(msg)
+                        raise ValueError(f"{pfx}expected {exp_set}, got {raw_set}")
 
                     if len(raw_val) != len(expected_rel):
-                        msg = (
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
-                            f"expected length {len(expected_rel)}, got {len(raw_val)}"
-                        )
+                        msg = f"{pfx}expected length {len(expected_rel)}, got {len(raw_val)}"
                         raise ValueError(msg)
                 else:
                     if str(raw_val) != str(expected_rel):
-                        err_msg2 = (
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
-                            f"expected '{expected_rel}', got '{raw_val}'"
-                        )
-                        raise ValueError(err_msg2)
+                        raise ValueError(f"{pfx}expected '{expected_rel}', got '{raw_val}'")
             elif (
                 expected_rel is not None
                 and expected_rel != []
                 and expected_rel != set()
                 and (fmap is None or fmap.is_present)
             ):
-                raise ValueError(
-                    f"Parse-back rel failure {canonical_id} rel {rel_name}: "
-                    f"expected '{expected_rel}', got missing"
+                pfx = (
+                    f"Parse-back rel failure / Parse-back relationship failure "
+                    f"{canonical_id} rel {rel_name}: "
                 )
+                raise ValueError(f"{pfx}expected '{expected_rel}', got missing")

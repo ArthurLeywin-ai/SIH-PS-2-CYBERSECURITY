@@ -41,6 +41,7 @@ families = {
     ],
     "alert": [
         "alert_id",
+        "source_alert_id",
         "organization_id",
         "asset_id",
         "created_at_utc",
@@ -80,6 +81,7 @@ families = {
         "case_id",
         "alert_id",
         "resolved_at_utc",
+        "resolution_type",
     ],
     "closure": [
         "closure_id",
@@ -88,6 +90,8 @@ families = {
         "alert_id",
         "resolution_id",
         "closed_at_utc",
+        "closure_status",
+        "disposition",
     ],
     "exception": ["exception_id", "organization_id", "exception_type"],
     "process_change": ["process_change_id", "organization_id", "change_type"],
@@ -150,7 +154,7 @@ SRC_D_NAMES = {
     },
     "asset": {
         "asset_id": "ass_id",
-        "source_asset_id": "sou_ass_id",
+        "source_asset_id": "ext_asset_id",
         "organization_id": "org_id",
         "asset_class": "ass_class",
     },
@@ -162,6 +166,7 @@ SRC_D_NAMES = {
     },
     "alert": {
         "alert_id": "ale_id",
+        "source_alert_id": "ext_alert_id",
         "organization_id": "org_id",
         "asset_id": "ass_id",
         "created_at_utc": "cre_at_utc",
@@ -222,6 +227,7 @@ SRC_D_NAMES = {
         "alert_id": "ale_id",
         "resolution_id": "res_id",
         "closed_at_utc": "clo_at_utc",
+        "closure_status": "clo_status",
         "disposition": "clo_disp",
     },
     "exception": {
@@ -365,35 +371,39 @@ def generate_profile(prof_variant: str):
     lines = []
 
     if prof_variant == "SRC-A":
-        lines.append('def get_src_a() -> ProfileDefinition:')
-        lines.append('    return ProfileDefinition(')
+        lines.append("def get_src_a() -> ProfileDefinition:")
+        lines.append("    return ProfileDefinition(")
         lines.append('        profile_id="SRC-A",')
         lines.append('        format="CSV",')
         lines.append('        timestamp_format="iso_z",')
     elif prof_variant == "SRC-B":
-        lines.append('def get_src_b() -> ProfileDefinition:')
-        lines.append('    return ProfileDefinition(')
+        lines.append("def get_src_b() -> ProfileDefinition:")
+        lines.append("    return ProfileDefinition(")
         lines.append('        profile_id="SRC-B",')
         lines.append('        format="CSV",')
         lines.append('        timestamp_format="local_iana",')
         lines.append('        case_naming="pascal_case",')
         lines.append('        timezone="America/New_York",')
     elif prof_variant == "SRC-C":
-        lines.append('def get_src_c() -> ProfileDefinition:')
-        lines.append('    return ProfileDefinition(')
+        lines.append("def get_src_c() -> ProfileDefinition:")
+        lines.append("    return ProfileDefinition(")
         lines.append('        profile_id="SRC-C",')
         lines.append('        format="JSON",')
         lines.append('        timestamp_format="iso_offset_ms",')
         lines.append('        case_naming="camel_case",')
-        lines.append('        relationships_nested=True,')
+        lines.append("        relationships_nested=True,")
     elif prof_variant == "SRC-D":
-        lines.append('def get_src_d() -> ProfileDefinition:')
-        lines.append('    return ProfileDefinition(')
+        lines.append(
+            'def get_src_d(json_mode: Literal["array", "lines"] = "array") -> ProfileDefinition:'
+        )
+        lines.append('    fmt: FormatType = "JSON" if json_mode == "array" else "JSONL"')
+        lines.append("    return ProfileDefinition(")
         lines.append('        profile_id="SRC-D",')
-        lines.append('        format="JSONL",')
+        lines.append("        format=fmt,")
+        lines.append("        json_mode=json_mode,")
         lines.append('        timestamp_format="date_only",')
         lines.append('        case_naming="mixed",')
-        lines.append('        per_family_timestamp_format={')
+        lines.append("        per_family_timestamp_format={")
         for fam in [
             "alert",
             "case",
@@ -418,24 +428,26 @@ def generate_profile(prof_variant: str):
             "monitoring_coverage",
         ]:
             lines.append(f'            "{fam}": "date_only",')
-        lines.append('        },')
+        lines.append("        },")
     elif prof_variant == "SRC-E-V1":
-        lines.append('def get_src_e_v1() -> ProfileDefinition:')
-        lines.append('    return ProfileDefinition(')
+        lines.append("def get_src_e_v1() -> ProfileDefinition:")
+        lines.append("    return ProfileDefinition(")
         lines.append('        profile_id="SRC-E",')
         lines.append('        version="1.0",')
+        lines.append('        id_namespace="E1",')
         lines.append('        format="CSV",')
         lines.append('        timestamp_format="iso_z",')
         lines.append('        case_naming="snake_case",')
     elif prof_variant == "SRC-E-V2":
-        lines.append('def get_src_e_v2() -> ProfileDefinition:')
-        lines.append('    return ProfileDefinition(')
+        lines.append("def get_src_e_v2() -> ProfileDefinition:")
+        lines.append("    return ProfileDefinition(")
         lines.append('        profile_id="SRC-E",')
         lines.append('        version="2.0",')
+        lines.append('        id_namespace="E2",')
         lines.append('        format="CSV",')
         lines.append('        timestamp_format="iso_offset_ms",')
         lines.append('        case_naming="mixed",')
-        lines.append('        per_family_format={')
+        lines.append("        per_family_format={")
         for fam in [
             "organization",
             "submission",
@@ -460,9 +472,9 @@ def generate_profile(prof_variant: str):
             "process_change",
         ]:
             lines.append(f'            "{fam}": "JSON",')
-        lines.append('        },')
+        lines.append("        },")
 
-    lines.append('        family_mappings={')
+    lines.append("        family_mappings={")
 
     for fam, fields in families.items():
         lines.append(f'            "{fam}": {{')
@@ -502,10 +514,10 @@ def generate_profile(prof_variant: str):
             if fam == "alert" and f == "case_id":
                 if prof_variant == "SRC-B":
                     # Case ID genuinely embedded in SRC-B alert CSV
-                    args = ['source_name="CaseId"', 'is_present=True']
+                    args = ['source_name="CaseId"', "is_present=True"]
                 elif prof_variant == "SRC-E-V1":
                     # Pre-migration old foreign key directly in alert
-                    args = ['source_name="case_id"', 'is_present=True']
+                    args = ['source_name="case_id"', "is_present=True"]
                 else:
                     # In SRC-A, SRC-C, SRC-D, SRC-E-V2, alert does not directly embed case_id
                     args.append("is_present=False")
@@ -585,7 +597,9 @@ def generate_profile(prof_variant: str):
             if len(f"                {mapping_str}") > 95:
                 args_str = ",\n                    ".join(args)
                 lines.append(
-                    f'                "{f}": FieldMapping(\n                    {args_str}\n                ),'
+                    f'                "{f}": FieldMapping(\n'
+                    f"                    {args_str}\n"
+                    f"                ),"
                 )
             else:
                 lines.append(f"                {mapping_str}")
@@ -600,7 +614,9 @@ out.append('''"""Catalog of M3 Source Profiles."""
 
 from __future__ import annotations
 
-from satsa_generator.profiles.models import FieldMapping, ProfileDefinition
+from typing import Literal
+
+from satsa_generator.profiles.models import FieldMapping, FormatType, ProfileDefinition
 from satsa_generator.profiles.vocabulary import (
     CATEGORY_SRC_D,
     CATEGORY_SRC_E_V1,

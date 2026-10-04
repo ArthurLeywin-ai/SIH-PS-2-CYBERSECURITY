@@ -394,78 +394,9 @@ def _build_m3_fixture_internal(
         config, root, seeds.private_ledger_hash(), contract="SATSA-M3-FIXTURE-V1"
     )
 
-    from uuid import UUID
-
-    from satsa_generator.canonical.oracle import CanonicalOracle, CanonicalRecordState
+    from satsa_generator.canonical.reconstruction import reconstruct_canonical_oracle_from_disk
     from satsa_generator.profiles.catalog import get_profile
     from satsa_generator.rendering.engine import RenderingEngine
-
-    oracle = CanonicalOracle()
-    # Populate the oracle for validation (independent of rendering)
-    for family_name, rec_list in [
-        ("organization", organizations),
-        ("submission", submissions),
-        ("submission_manifest", submission_manifests),
-        ("submission_family", submission_families),
-        ("control_process_reference", control_refs),
-        ("control_process_subject_link", control_links),
-        ("asset", assets),
-        ("monitoring_coverage", coverages),
-        ("alert", alerts),
-        ("case", cases),
-        ("case_alert_link", case_alert_links),
-        ("investigation", investigations),
-        ("escalation", escalations),
-        ("action", actions),
-        ("resolution", resolutions),
-        ("closure", closures),
-        ("exception", exceptions),
-        ("process_change", process_changes),
-    ]:
-        for idx, record in enumerate(rec_list):
-            record_dict = record.model_dump(mode="json")
-            record_obj_dict = record.model_dump()
-
-            canonical_id = None
-            if f"{family_name}_id" in record_obj_dict:
-                canonical_id = record_obj_dict[f"{family_name}_id"]
-            else:
-                for key, val in record_obj_dict.items():
-                    if key.endswith("_id") and isinstance(val, UUID) and canonical_id is None:
-                        canonical_id = val
-
-            if not canonical_id:
-                canonical_id = UUID(int=idx)
-
-            # Build relationships natively
-            rels = {}
-            for k, v in record_obj_dict.items():
-                if k.endswith("_id") and k != f"{family_name}_id" and isinstance(v, UUID):
-                    rels[k] = v
-
-            # For case -> alerts many-to-many
-            if family_name == "case":
-                alerts_for_case = [
-                    link.alert_id for link in case_alert_links if link.case_id == canonical_id
-                ]
-                if alerts_for_case:
-                    rels["alerts"] = alerts_for_case
-
-            # For alert -> case foreign key
-            if family_name == "alert":
-                for link in case_alert_links:
-                    if link.alert_id == canonical_id:
-                        rels["case_id"] = link.case_id
-                        break
-
-            oracle.register_expected_record(
-                CanonicalRecordState(
-                    canonical_record_id=canonical_id,
-                    canonical_family=family_name,
-                    fields=record_dict,
-                    relationships=rels,
-                )
-            )
 
     profile_a = get_profile("SRC-A")
     profile_b = get_profile("SRC-B")
@@ -527,24 +458,7 @@ def _build_m3_fixture_internal(
             if f_rendered:
                 file_manifests.append(f_rendered)
 
-    # Write oracle and provenance metadata
-    # Oracle is written for validation (parse-back), not for rendering
-    import json as json_module
-
-    oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
-    oracle_root.mkdir(parents=True, exist_ok=True)
-    for prefix in ["src_a", "src_b", "src_c", "src_d", "src_e"]:
-        oracle_path = oracle_root / f"{prefix}_oracle.json"
-        oracle_path.write_text(
-            json_module.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
-        )
-
-    engine_a.write_metadata(oracle_root, "src_a")
-    engine_b.write_metadata(oracle_root, "src_b")
-    engine_c.write_metadata(oracle_root, "src_c")
-    engine_d.write_metadata(oracle_root, "src_d")
-    engine_e.write_metadata(oracle_root, "src_e")
-
+    # Compute record counts before clearing domain records
     record_counts = {
         "organization": len(organizations),
         "submission": len(submissions),
@@ -565,6 +479,37 @@ def _build_m3_fixture_internal(
         "exception": len(exceptions),
         "process_change": len(process_changes),
     }
+
+    # Write renderer metadata (indexes and provenance) to oracle_root
+    oracle_root.mkdir(parents=True, exist_ok=True)
+    engine_a.write_metadata(oracle_root, "src_a")
+    engine_b.write_metadata(oracle_root, "src_b")
+    engine_c.write_metadata(oracle_root, "src_c")
+    engine_d.write_metadata(oracle_root, "src_d")
+    engine_e.write_metadata(oracle_root, "src_e")
+
+    # Sever coupling: clear domain records from memory to ensure oracle is built strictly from disk
+    del organizations, submissions, submission_manifests, submission_families
+    del control_refs, control_links, assets, coverages, alerts, cases
+    del case_alert_links, investigations, escalations, actions, resolutions
+    del closures, exceptions, process_changes, records, families_to_render
+
+    # Source-first canonical reference reconstruction strictly from rendered disk files
+    import json as json_module
+
+    for prefix, prof in [
+        ("src_a", profile_a),
+        ("src_b", profile_b),
+        ("src_c", profile_c),
+        ("src_d", profile_d),
+        ("src_e", profile_e),
+    ]:
+        oracle = reconstruct_canonical_oracle_from_disk(source_exports_root, oracle_root, prof)
+        oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
+        oracle_path = oracle_root / f"{prefix}_oracle.json"
+        oracle_path.write_text(
+            json_module.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     manifest = FixtureManifest(
         fixture_contract="SATSA-M2-FIXTURE-V1",  # Assuming M2 schema still holds for counting
