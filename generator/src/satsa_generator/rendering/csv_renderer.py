@@ -91,6 +91,21 @@ class CSVRenderer(BaseRenderer):
                                 canonical_object_id=rels[canonical_field],
                             )
                         )
+                    elif (
+                        canonical_field.endswith("_id")
+                        and canonical_field != f"{family}_id"
+                        and isinstance(record_obj_dict.get(canonical_field), UUID)
+                    ):
+                        context.relationship_provenance.append(
+                            RelationshipProvenance(
+                                source_file_path=context.output_path,
+                                source_record_locator=f"row:{idx + 1}",
+                                source_relationship_field=source_name,
+                                relationship_type=canonical_field,
+                                canonical_subject_id=canonical_id,
+                                canonical_object_id=record_obj_dict[canonical_field],
+                            )
+                        )
 
             if writer is None:
                 writer = csv.DictWriter(

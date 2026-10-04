@@ -37,6 +37,13 @@ class FieldMapping(BaseModel):
     path: list[str] | None = None
     # Optional Source ID logic
     is_native_id: bool = False
+    # Reference array support (e.g., case.alerts -> array of references)
+    is_reference_array: bool = False
+
+
+TimestampFormat = Literal["iso_z", "iso_offset", "iso_offset_ms", "local_iana", "date_only"]
+FormatType = Literal["CSV", "JSON", "JSONL"]
+CaseNamingType = Literal["snake_case", "pascal_case", "camel_case", "mixed", "custom"]
 
 
 class ProfileDefinition(BaseModel):
@@ -46,13 +53,27 @@ class ProfileDefinition(BaseModel):
 
     profile_id: Literal["SRC-A", "SRC-B", "SRC-C", "SRC-D", "SRC-E"]
     version: str = "1.0"
-    format: Literal["CSV", "JSON", "JSONL"]
-    case_naming: Literal["snake_case", "pascal_case", "camel_case", "mixed"] = "snake_case"
-    timestamp_format: Literal["iso_z", "iso_offset_ms", "local_iana", "date_only"]
+    format: FormatType
+    case_naming: CaseNamingType = "snake_case"
+    timestamp_format: TimestampFormat
     timezone: str = "UTC"  # For local_iana
+
+    # Per-family overrides for hybrid profiles or mixed formats:
+    per_family_format: dict[str, FormatType] = Field(default_factory=dict)
+    per_family_timestamp_format: dict[str, TimestampFormat] = Field(default_factory=dict)
+    per_family_timezone: dict[str, str] = Field(default_factory=dict)
 
     # Whether child IDs or relationships are nested
     relationships_nested: bool = False
 
     # Maps canonical evidence family (e.g., "case", "alert") to its field mappings
     family_mappings: dict[str, dict[str, FieldMapping]] = Field(default_factory=dict)
+
+    def get_format(self, family: str) -> FormatType:
+        return self.per_family_format.get(family, self.format)
+
+    def get_timestamp_format(self, family: str) -> TimestampFormat:
+        return self.per_family_timestamp_format.get(family, self.timestamp_format)
+
+    def get_timezone(self, family: str) -> str:
+        return self.per_family_timezone.get(family, self.timezone)

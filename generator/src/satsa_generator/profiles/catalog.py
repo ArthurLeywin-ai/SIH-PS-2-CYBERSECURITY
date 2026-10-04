@@ -6,9 +6,14 @@ from satsa_generator.profiles.models import FieldMapping, ProfileDefinition
 from satsa_generator.profiles.vocabulary import (
     CATEGORY_SRC_D,
     CATEGORY_SRC_E,
+    CRITICALITY_BAND_SRC_B,
+    CRITICALITY_BAND_SRC_C,
+    CRITICALITY_BAND_SRC_D,
+    CRITICALITY_BAND_SRC_E,
     DISPOSITION_SRC_D,
     DISPOSITION_SRC_E,
     MATURITY_SRC_B,
+    MATURITY_SRC_C,
     MATURITY_SRC_D,
     MATURITY_SRC_E,
     SEVERITY_SRC_B,
@@ -90,6 +95,9 @@ def get_src_a() -> ProfileDefinition:
                 "organization_id": FieldMapping(source_name="organization_id"),
                 "asset_id": FieldMapping(source_name="asset_id"),
                 "created_at_utc": FieldMapping(source_name="created_at_utc"),
+                "alert_category": FieldMapping(source_name="alert_category"),
+                "severity": FieldMapping(source_name="severity"),
+                "disposition": FieldMapping(source_name="disposition"),
             },
             "case": {
                 "case_id": FieldMapping(source_name="case_id", is_native_id=True),
@@ -97,6 +105,7 @@ def get_src_a() -> ProfileDefinition:
                 "case_type": FieldMapping(source_name="case_type"),
                 "severity": FieldMapping(source_name="severity"),
                 "created_at_utc": FieldMapping(source_name="created_at_utc"),
+                "alerts": FieldMapping(source_name="alerts", is_present=False),
             },
             "case_alert_link": {
                 "case_alert_link_id": FieldMapping(
@@ -112,6 +121,7 @@ def get_src_a() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="case_id"),
                 "alert_id": FieldMapping(source_name="alert_id"),
                 "started_at_utc": FieldMapping(source_name="started_at_utc"),
+                "disposition": FieldMapping(source_name="disposition"),
             },
             "escalation": {
                 "escalation_id": FieldMapping(source_name="escalation_id", is_native_id=True),
@@ -174,7 +184,7 @@ def get_src_b() -> ProfileDefinition:
                 ),
                 "organization_name": FieldMapping(source_name="OrganizationName"),
                 "entity_criticality_band": FieldMapping(
-                    source_name="EntityCriticalityBand", vocabulary=SEVERITY_SRC_B
+                    source_name="EntityCriticalityBand", vocabulary=CRITICALITY_BAND_SRC_B
                 ),
                 "organization_status": FieldMapping(
                     source_name="OrganizationStatus", vocabulary=STATUS_SRC_B
@@ -237,13 +247,17 @@ def get_src_b() -> ProfileDefinition:
                 "organization_id": FieldMapping(source_name="OrganizationId"),
                 "asset_id": FieldMapping(source_name="AssetId"),
                 "created_at_utc": FieldMapping(source_name="CreatedAtUtc"),
+                "alert_category": FieldMapping(source_name="AlertCategory"),
+                "severity": FieldMapping(source_name="Severity", vocabulary=SEVERITY_SRC_B),
+                "disposition": FieldMapping(source_name="Disposition"),
             },
             "case": {
                 "case_id": FieldMapping(source_name="CaseId", is_native_id=True),
                 "organization_id": FieldMapping(source_name="OrganizationId"),
                 "case_type": FieldMapping(source_name="CaseType"),
-                "severity": FieldMapping(source_name="Severity"),
+                "severity": FieldMapping(source_name="Severity", vocabulary=SEVERITY_SRC_B),
                 "created_at_utc": FieldMapping(source_name="CreatedAtUtc"),
+                "alerts": FieldMapping(source_name="Alerts", is_present=False),
             },
             "case_alert_link": {
                 "case_alert_link_id": FieldMapping(
@@ -259,6 +273,7 @@ def get_src_b() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="CaseId"),
                 "alert_id": FieldMapping(source_name="AlertId"),
                 "started_at_utc": FieldMapping(source_name="StartedAtUtc"),
+                "disposition": FieldMapping(source_name="Disposition"),
             },
             "escalation": {
                 "escalation_id": FieldMapping(source_name="EscalationId", is_native_id=True),
@@ -321,7 +336,7 @@ def get_src_c() -> ProfileDefinition:
                 "entity_criticality_band": FieldMapping(
                     source_name="entityCriticalityBand",
                     path=["details", "entityCriticalityBand"],
-                    vocabulary=SEVERITY_SRC_C,
+                    vocabulary=CRITICALITY_BAND_SRC_C,
                 ),
                 "organization_status": FieldMapping(
                     source_name="organizationStatus",
@@ -337,7 +352,9 @@ def get_src_c() -> ProfileDefinition:
                 "submission_id": FieldMapping(source_name="submissionId", is_native_id=True),
                 "organization_id": FieldMapping(source_name="organizationId"),
                 "period_maturity_state": FieldMapping(
-                    source_name="periodMaturityState", path=["details", "periodMaturityState"]
+                    source_name="periodMaturityState",
+                    path=["details", "periodMaturityState"],
+                    vocabulary=MATURITY_SRC_C,
                 ),
                 "reporting_period_start_at_utc": FieldMapping(
                     source_name="reportingPeriodStartAtUtc",
@@ -406,12 +423,23 @@ def get_src_c() -> ProfileDefinition:
                 "created_at_utc": FieldMapping(
                     source_name="createdAtUtc", path=["details", "createdAtUtc"]
                 ),
+                "alert_category": FieldMapping(
+                    source_name="alertCategory", path=["details", "alertCategory"]
+                ),
+                "severity": FieldMapping(
+                    source_name="severity", path=["details", "severity"], vocabulary=SEVERITY_SRC_C
+                ),
+                "disposition": FieldMapping(
+                    source_name="disposition", path=["details", "disposition"]
+                ),
             },
             "case": {
                 "case_id": FieldMapping(source_name="caseId", is_native_id=True),
                 "organization_id": FieldMapping(source_name="organizationId"),
                 "case_type": FieldMapping(source_name="caseType", path=["details", "caseType"]),
-                "severity": FieldMapping(source_name="severity", path=["details", "severity"]),
+                "severity": FieldMapping(
+                    source_name="severity", path=["details", "severity"], vocabulary=SEVERITY_SRC_C
+                ),
                 "created_at_utc": FieldMapping(
                     source_name="createdAtUtc", path=["details", "createdAtUtc"]
                 ),
@@ -432,6 +460,9 @@ def get_src_c() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="alertId"),
                 "started_at_utc": FieldMapping(
                     source_name="startedAtUtc", path=["details", "startedAtUtc"]
+                ),
+                "disposition": FieldMapping(
+                    source_name="disposition", path=["details", "disposition"]
                 ),
             },
             "escalation": {
@@ -496,13 +527,33 @@ def get_src_d() -> ProfileDefinition:
         format="JSONL",
         timestamp_format="date_only",
         case_naming="mixed",
+        per_family_timestamp_format={
+            "alert": "iso_offset",
+            "case": "iso_offset",
+            "case_alert_link": "iso_offset",
+            "investigation": "iso_offset",
+            "escalation": "iso_offset",
+            "action": "iso_offset",
+            "resolution": "iso_offset",
+            "closure": "iso_offset",
+            "exception": "iso_offset",
+            "process_change": "iso_offset",
+            "organization": "date_only",
+            "submission": "date_only",
+            "submission_manifest": "date_only",
+            "submission_family": "date_only",
+            "control_process_reference": "date_only",
+            "control_process_subject_link": "date_only",
+            "asset": "date_only",
+            "monitoring_coverage": "date_only",
+        },
         family_mappings={
             "organization": {
                 "organization_id": FieldMapping(source_name="org_id", is_native_id=True),
                 "source_organization_id": FieldMapping(source_name="sou_org_id", is_present=False),
                 "organization_name": FieldMapping(source_name="org_name"),
                 "entity_criticality_band": FieldMapping(
-                    source_name="ent_cri_band", vocabulary=SEVERITY_SRC_D
+                    source_name="ent_cri_band", vocabulary=CRITICALITY_BAND_SRC_D
                 ),
                 "organization_status": FieldMapping(
                     source_name="org_status", vocabulary=STATUS_SRC_D
@@ -536,7 +587,7 @@ def get_src_d() -> ProfileDefinition:
                 "display_name": FieldMapping(source_name="dis_name"),
             },
             "control_process_subject_link": {
-                "control_process_link_id": FieldMapping(source_name="con_pro_id"),
+                "control_process_link_id": FieldMapping(source_name="con_pro_link_id"),
                 "control_process_ref_id": FieldMapping(source_name="con_pro_id"),
                 "subject_type": FieldMapping(source_name="sub_type"),
             },
@@ -567,7 +618,7 @@ def get_src_d() -> ProfileDefinition:
                 "case_type": FieldMapping(source_name="cas_type"),
                 "severity": FieldMapping(source_name="cas_sev", vocabulary=SEVERITY_SRC_D),
                 "created_at_utc": FieldMapping(source_name="cre_at_utc"),
-                "alerts": FieldMapping(source_name="alerts"),
+                "alerts": FieldMapping(source_name="alerts", is_reference_array=True),
             },
             "case_alert_link": {
                 "case_alert_link_id": FieldMapping(source_name="cas_ale_id", is_native_id=True),
@@ -604,9 +655,6 @@ def get_src_d() -> ProfileDefinition:
                 "case_id": FieldMapping(source_name="cas_id"),
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "resolved_at_utc": FieldMapping(source_name="res_at_utc"),
-                "resolution_type": FieldMapping(
-                    source_name="res_type", vocabulary=DISPOSITION_SRC_D
-                ),
             },
             "closure": {
                 "closure_id": FieldMapping(source_name="clo_id", is_native_id=True),
@@ -615,7 +663,6 @@ def get_src_d() -> ProfileDefinition:
                 "alert_id": FieldMapping(source_name="ale_id"),
                 "resolution_id": FieldMapping(source_name="res_id"),
                 "closed_at_utc": FieldMapping(source_name="clo_at_utc"),
-                "disposition": FieldMapping(source_name="clo_disp", vocabulary=DISPOSITION_SRC_D),
             },
             "exception": {
                 "exception_id": FieldMapping(source_name="exc_id", is_native_id=True),
@@ -635,158 +682,167 @@ def get_src_e() -> ProfileDefinition:
     return ProfileDefinition(
         profile_id="SRC-E",
         format="CSV",
-        timestamp_format="iso_z",
         version="2.0",
+        timestamp_format="iso_z",
+        case_naming="mixed",
+        per_family_format={
+            "organization": "CSV",
+            "submission": "CSV",
+            "submission_manifest": "CSV",
+            "submission_family": "CSV",
+            "control_process_reference": "CSV",
+            "control_process_subject_link": "CSV",
+            "asset": "CSV",
+            "monitoring_coverage": "CSV",
+            "alert": "JSON",
+            "case": "JSON",
+            "case_alert_link": "JSON",
+            "investigation": "JSON",
+            "escalation": "JSON",
+            "action": "JSON",
+            "resolution": "JSON",
+            "closure": "JSON",
+            "exception": "JSON",
+            "process_change": "JSON",
+        },
         family_mappings={
             "organization": {
-                "organization_id": FieldMapping(source_name="v2_org_id", is_native_id=True),
-                "source_organization_id": FieldMapping(source_name="v2_sou_org_id"),
-                "organization_name": FieldMapping(source_name="v2_org_name"),
+                "organization_id": FieldMapping(source_name="org_id", is_native_id=True),
+                "source_organization_id": FieldMapping(source_name="legacy_org_code"),
+                "organization_name": FieldMapping(source_name="entity_name"),
                 "entity_criticality_band": FieldMapping(
-                    source_name="v2_ent_cri_band", vocabulary=SEVERITY_SRC_E
+                    source_name="criticality_tier", vocabulary=CRITICALITY_BAND_SRC_E
                 ),
                 "organization_status": FieldMapping(
-                    source_name="v2_org_status", vocabulary=STATUS_SRC_E
+                    source_name="lifecycle_status", vocabulary=STATUS_SRC_E
                 ),
-                "profile_effective_start_at_utc": FieldMapping(source_name="v2_pro_eff_utc"),
+                "profile_effective_start_at_utc": FieldMapping(source_name="valid_from_utc"),
             },
             "submission": {
-                "submission_id": FieldMapping(source_name="v2_sub_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
+                "submission_id": FieldMapping(source_name="sub_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
                 "period_maturity_state": FieldMapping(
-                    source_name="v2_per_mat_state", vocabulary=MATURITY_SRC_E
+                    source_name="maturity_level", vocabulary=MATURITY_SRC_E
                 ),
-                "reporting_period_start_at_utc": FieldMapping(source_name="v2_rep_per_utc"),
+                "reporting_period_start_at_utc": FieldMapping(source_name="period_start_utc"),
             },
             "submission_manifest": {
-                "manifest_id": FieldMapping(source_name="v2_man_id", is_native_id=True),
-                "submission_id": FieldMapping(source_name="v2_sub_id"),
-                "created_at_utc": FieldMapping(source_name="v2_cre_at_utc"),
+                "manifest_id": FieldMapping(source_name="manifest_id", is_native_id=True),
+                "submission_id": FieldMapping(source_name="sub_id"),
+                "created_at_utc": FieldMapping(source_name="manifest_timestamp_utc"),
             },
             "submission_family": {
                 "submission_family_id": FieldMapping(
-                    source_name="v2_sub_fam_id", is_native_id=True
+                    source_name="family_decl_id", is_native_id=True
                 ),
-                "submission_id": FieldMapping(source_name="v2_sub_id"),
-                "evidence_family": FieldMapping(source_name="v2_evi_family"),
-                "presence_state": FieldMapping(source_name="v2_pre_state"),
+                "submission_id": FieldMapping(source_name="sub_id"),
+                "evidence_family": FieldMapping(source_name="family_name"),
+                "presence_state": FieldMapping(source_name="presence_status"),
             },
             "control_process_reference": {
-                "control_process_ref_id": FieldMapping(source_name="v2_con_pro_id"),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "reference_type": FieldMapping(source_name="v2_ref_type"),
-                "reference_code": FieldMapping(source_name="v2_ref_code"),
-                "display_name": FieldMapping(source_name="v2_dis_name"),
+                "control_process_ref_id": FieldMapping(source_name="ref_id"),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "reference_type": FieldMapping(source_name="control_type"),
+                "reference_code": FieldMapping(source_name="framework_code"),
+                "display_name": FieldMapping(source_name="title"),
             },
             "control_process_subject_link": {
-                "control_process_link_id": FieldMapping(source_name="v2_con_pro_id"),
-                "control_process_ref_id": FieldMapping(source_name="v2_con_pro_id"),
-                "subject_type": FieldMapping(source_name="v2_sub_type"),
+                "control_process_link_id": FieldMapping(source_name="link_id"),
+                "control_process_ref_id": FieldMapping(source_name="ref_id"),
+                "subject_type": FieldMapping(source_name="target_type"),
             },
             "asset": {
-                "asset_id": FieldMapping(source_name="v2_ass_id", is_native_id=True),
-                "source_asset_id": FieldMapping(source_name="v2_sou_ass_id"),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "asset_class": FieldMapping(source_name="v2_ass_class"),
+                "asset_id": FieldMapping(source_name="asset_id", is_native_id=True),
+                "source_asset_id": FieldMapping(source_name="external_asset_tag"),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "asset_class": FieldMapping(source_name="device_type"),
             },
             "monitoring_coverage": {
                 "monitoring_coverage_id": FieldMapping(
-                    source_name="v2_mon_cov_id", is_native_id=True
+                    source_name="coverage_id", is_native_id=True
                 ),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "asset_id": FieldMapping(source_name="v2_ass_id"),
-                "monitoring_type": FieldMapping(source_name="v2_mon_type"),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "asset_id": FieldMapping(source_name="asset_id"),
+                "monitoring_type": FieldMapping(source_name="sensor_type"),
             },
             "alert": {
-                "alert_id": FieldMapping(source_name="v2_ale_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "asset_id": FieldMapping(source_name="v2_ass_id"),
-                "created_at_utc": FieldMapping(source_name="v2_cre_at_utc"),
+                "alert_id": FieldMapping(source_name="id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "asset_id": FieldMapping(source_name="target_asset_id"),
+                "created_at_utc": FieldMapping(source_name="timestamp_utc"),
                 "alert_category": FieldMapping(
-                    source_name="v2_ale_cat", vocabulary=CATEGORY_SRC_E
+                    source_name="event_category", vocabulary=CATEGORY_SRC_E
                 ),
-                "severity": FieldMapping(
-                    source_name="v2_ale_sev", vocabulary=SEVERITY_SRC_E
-                ),
-                "disposition": FieldMapping(
-                    source_name="v2_ale_disp", vocabulary=DISPOSITION_SRC_E
-                ),
+                "severity": FieldMapping(source_name="event_severity", vocabulary=SEVERITY_SRC_E),
+                "disposition": FieldMapping(source_name="outcome", vocabulary=DISPOSITION_SRC_E),
             },
             "case": {
-                "case_id": FieldMapping(source_name="v2_cas_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "case_type": FieldMapping(source_name="v2_cas_type"),
-                "severity": FieldMapping(source_name="v2_cas_sev", vocabulary=SEVERITY_SRC_E),
-                "created_at_utc": FieldMapping(source_name="v2_cre_at_utc"),
+                "case_id": FieldMapping(source_name="case_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "case_type": FieldMapping(source_name="incident_type"),
+                "severity": FieldMapping(source_name="severity", vocabulary=SEVERITY_SRC_E),
+                "created_at_utc": FieldMapping(source_name="opened_at_utc"),
+                "alerts": FieldMapping(source_name="linked_alert_ids", is_reference_array=True),
             },
             "case_alert_link": {
-                "case_alert_link_id": FieldMapping(source_name="v2_cas_ale_id", is_native_id=True),
-                "case_id": FieldMapping(source_name="v2_cas_id"),
-                "alert_id": FieldMapping(source_name="v2_ale_id"),
-                "link_type": FieldMapping(source_name="v2_lin_type"),
+                "case_alert_link_id": FieldMapping(source_name="link_id", is_native_id=True),
+                "case_id": FieldMapping(source_name="parent_case_id"),
+                "alert_id": FieldMapping(source_name="child_alert_id"),
+                "link_type": FieldMapping(source_name="link_role"),
             },
             "investigation": {
-                "investigation_id": FieldMapping(source_name="v2_inv_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "case_id": FieldMapping(source_name="v2_cas_id"),
-                "alert_id": FieldMapping(source_name="v2_ale_id"),
-                "started_at_utc": FieldMapping(source_name="v2_sta_at_utc"),
-                "disposition": FieldMapping(
-                    source_name="v2_inv_disp", vocabulary=DISPOSITION_SRC_E
-                ),
+                "investigation_id": FieldMapping(source_name="inv_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "case_id": FieldMapping(source_name="case_id"),
+                "alert_id": FieldMapping(source_name="alert_id"),
+                "started_at_utc": FieldMapping(source_name="start_timestamp_utc"),
+                "disposition": FieldMapping(source_name="outcome", vocabulary=DISPOSITION_SRC_E),
             },
             "escalation": {
-                "escalation_id": FieldMapping(source_name="v2_esc_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "case_id": FieldMapping(source_name="v2_cas_id"),
-                "alert_id": FieldMapping(source_name="v2_ale_id"),
-                "escalated_at_utc": FieldMapping(source_name="v2_esc_at_utc"),
+                "escalation_id": FieldMapping(source_name="esc_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "case_id": FieldMapping(source_name="case_id"),
+                "alert_id": FieldMapping(source_name="alert_id"),
+                "escalated_at_utc": FieldMapping(source_name="escalated_timestamp_utc"),
             },
             "action": {
-                "action_id": FieldMapping(source_name="v2_act_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "asset_id": FieldMapping(source_name="v2_ass_id"),
-                "alert_id": FieldMapping(source_name="v2_ale_id"),
-                "case_id": FieldMapping(source_name="v2_cas_id"),
-                "action_type": FieldMapping(source_name="v2_act_type"),
+                "action_id": FieldMapping(source_name="action_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "asset_id": FieldMapping(source_name="asset_id"),
+                "alert_id": FieldMapping(source_name="alert_id"),
+                "case_id": FieldMapping(source_name="case_id"),
+                "action_type": FieldMapping(source_name="response_action"),
             },
             "resolution": {
-                "resolution_id": FieldMapping(source_name="v2_res_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "case_id": FieldMapping(source_name="v2_cas_id"),
-                "alert_id": FieldMapping(source_name="v2_ale_id"),
-                "resolved_at_utc": FieldMapping(source_name="v2_res_at_utc"),
-                "resolution_type": FieldMapping(
-                    source_name="v2_res_type", vocabulary=DISPOSITION_SRC_E
-                ),
+                "resolution_id": FieldMapping(source_name="resolution_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "case_id": FieldMapping(source_name="case_id"),
+                "alert_id": FieldMapping(source_name="alert_id"),
+                "resolved_at_utc": FieldMapping(source_name="resolved_timestamp_utc"),
             },
             "closure": {
-                "closure_id": FieldMapping(source_name="v2_clo_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "case_id": FieldMapping(source_name="v2_cas_id"),
-                "alert_id": FieldMapping(source_name="v2_ale_id"),
-                "resolution_id": FieldMapping(source_name="v2_res_id"),
-                "closed_at_utc": FieldMapping(source_name="v2_clo_at_utc"),
-                "disposition": FieldMapping(
-                    source_name="v2_clo_disp", vocabulary=DISPOSITION_SRC_E
-                ),
+                "closure_id": FieldMapping(source_name="closure_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "case_id": FieldMapping(source_name="case_id"),
+                "alert_id": FieldMapping(source_name="alert_id"),
+                "resolution_id": FieldMapping(source_name="resolution_id"),
+                "closed_at_utc": FieldMapping(source_name="closed_timestamp_utc"),
             },
             "exception": {
-                "exception_id": FieldMapping(source_name="v2_exc_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "exception_type": FieldMapping(source_name="v2_exc_type"),
+                "exception_id": FieldMapping(source_name="exception_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "exception_type": FieldMapping(source_name="deviation_category"),
             },
             "process_change": {
-                "process_change_id": FieldMapping(source_name="v2_pro_cha_id", is_native_id=True),
-                "organization_id": FieldMapping(source_name="v2_org_id"),
-                "change_type": FieldMapping(source_name="v2_cha_type"),
+                "process_change_id": FieldMapping(source_name="change_id", is_native_id=True),
+                "organization_id": FieldMapping(source_name="org_id"),
+                "change_type": FieldMapping(source_name="modification_type"),
             },
         },
     )
 
 
 def get_profile(profile_id: str) -> ProfileDefinition:
-    """Get a profile definition by ID."""
     profiles = {
         "SRC-A": get_src_a,
         "SRC-B": get_src_b,

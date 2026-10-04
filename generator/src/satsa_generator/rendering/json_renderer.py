@@ -25,7 +25,7 @@ class JSONRenderer(BaseRenderer):
         context: RenderContext,
     ) -> bytes:
         if not records:
-            if context.profile.format == "JSONL":
+            if context.profile.get_format(family) == "JSONL":
                 return b""
             return b"[]"
 
@@ -96,6 +96,21 @@ class JSONRenderer(BaseRenderer):
                                 canonical_object_id=rels[canonical_field],
                             )
                         )
+                    elif (
+                        canonical_field.endswith("_id")
+                        and canonical_field != f"{family}_id"
+                        and isinstance(record_obj_dict.get(canonical_field), UUID)
+                    ):
+                        context.relationship_provenance.append(
+                            RelationshipProvenance(
+                                source_file_path=context.output_path,
+                                source_record_locator=f"[{idx}]{locator_suffix}",
+                                source_relationship_field=path[-1] if path else source_name,
+                                relationship_type=canonical_field,
+                                canonical_subject_id=canonical_id,
+                                canonical_object_id=record_obj_dict[canonical_field],
+                            )
+                        )
 
             rendered_list.append(source_obj)
 
@@ -115,10 +130,11 @@ class JSONRenderer(BaseRenderer):
                 )
             )
 
-        if context.profile.format == "JSON":
+        family_fmt = context.profile.get_format(family)
+        if family_fmt == "JSON":
             content = json.dumps(rendered_list, indent=2, sort_keys=True)
             return content.encode("utf-8")
-        elif context.profile.format == "JSONL":
+        elif family_fmt == "JSONL":
             content = "\n".join(json.dumps(obj, sort_keys=True) for obj in rendered_list)
             return content.encode("utf-8")
 

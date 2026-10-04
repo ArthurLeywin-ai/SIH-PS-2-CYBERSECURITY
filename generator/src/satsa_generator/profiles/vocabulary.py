@@ -10,74 +10,143 @@ def create_vocab(mapping: dict[str, str | int], on_unknown: str = "fail") -> Voc
     )
 
 
-# SRC-B mappings (Numeric/abbreviated)
-SEVERITY_SRC_B = create_vocab({"STANDARD": 1, "ELEVATED": 2, "HIGH": 3, "UNKNOWN": 0})
+# SRC-B mappings (Numeric/abbreviated, strict failure on unknown)
+CRITICALITY_BAND_SRC_B = create_vocab({"STANDARD": 1, "ELEVATED": 2, "HIGH": 3, "UNKNOWN": 0})
 
-STATUS_SRC_B = create_vocab({"ACTIVE": "ACT", "INACTIVE": "INA", "UNKNOWN": "UNK"})
+SEVERITY_SRC_B = create_vocab(
+    {
+        "INFORMATIONAL": 0,
+        "LOW": 1,
+        "MEDIUM": 2,
+        "HIGH": 3,
+        "CRITICAL": 4,
+        "UNKNOWN": -1,
+    }
+)
+
+STATUS_SRC_B = create_vocab(
+    {"ACTIVE": "ACT", "INACTIVE": "INA", "DECOMMISSIONING": "DEC", "UNKNOWN": "UNK"}
+)
 
 MATURITY_SRC_B = create_vocab({"MATURE": 1, "IMMATURE": 0, "PARTIAL": 2, "UNKNOWN": -1})
 
 # SRC-C mappings (vendor-like text variants)
-SEVERITY_SRC_C = create_vocab(
+CRITICALITY_BAND_SRC_C = create_vocab(
     {"STANDARD": "normal", "ELEVATED": "warning", "HIGH": "critical", "UNKNOWN": "unknown"}
 )
 
-STATUS_SRC_C = create_vocab({"ACTIVE": "running", "INACTIVE": "stopped", "UNKNOWN": "unknown"})
+SEVERITY_SRC_C = create_vocab(
+    {
+        "INFORMATIONAL": "informational",
+        "LOW": "low",
+        "MEDIUM": "warning",
+        "HIGH": "high",
+        "CRITICAL": "critical",
+        "UNKNOWN": "unknown",
+    }
+)
+
+STATUS_SRC_C = create_vocab(
+    {
+        "ACTIVE": "running",
+        "INACTIVE": "stopped",
+        "DECOMMISSIONING": "decommissioned",
+        "UNKNOWN": "unknown",
+    }
+)
+
+MATURITY_SRC_C = create_vocab(
+    {"MATURE": "mature", "IMMATURE": "immature", "PARTIAL": "partial", "UNKNOWN": "unknown"}
+)
 
 # SRC-D mappings (lowercase/free-text with unknowns, pass-through for unknown)
-SEVERITY_SRC_D = create_vocab(
+CRITICALITY_BAND_SRC_D = create_vocab(
     {"STANDARD": "standard", "ELEVATED": "elevated", "HIGH": "high", "UNKNOWN": "unknown"},
-    on_unknown="pass_through"
+    on_unknown="pass_through",
+)
+
+SEVERITY_SRC_D = create_vocab(
+    {
+        "INFORMATIONAL": "informational",
+        "LOW": "low",
+        "MEDIUM": "medium",
+        "HIGH": "high",
+        "CRITICAL": "critical",
+        "UNKNOWN": "unknown",
+    },
+    on_unknown="pass_through",
 )
 
 STATUS_SRC_D = create_vocab(
-    {"ACTIVE": "active", "INACTIVE": "inactive", "UNKNOWN": "unknown"},
-    on_unknown="pass_through"
+    {
+        "ACTIVE": "active",
+        "INACTIVE": "inactive",
+        "DECOMMISSIONING": "decommissioning",
+        "UNKNOWN": "unknown",
+    },
+    on_unknown="pass_through",
 )
 
 MATURITY_SRC_D = create_vocab(
     {"MATURE": "mature", "IMMATURE": "immature", "PARTIAL": "partial", "UNKNOWN": "unknown"},
-    on_unknown="pass_through"
+    on_unknown="pass_through",
 )
 
-# SRC-E mappings (versioned/v2 vocabulary drift)
+# SRC-E mappings (versioned/v2 vocabulary drift, strict failure on unknown)
+CRITICALITY_BAND_SRC_E = create_vocab(
+    {"STANDARD": "STD", "ELEVATED": "ELE", "HIGH": "HI", "UNKNOWN": "UNK"}
+)
+
 SEVERITY_SRC_E = create_vocab(
-    {"STANDARD": "std", "ELEVATED": "ele", "HIGH": "hi", "CRITICAL": "crit", "UNKNOWN": "unk"}
+    {
+        "INFORMATIONAL": "INFO",
+        "LOW": "LOW",
+        "MEDIUM": "MED",
+        "HIGH": "HI",
+        "CRITICAL": "CRIT",
+        "UNKNOWN": "UNK",
+    }
 )
 
 STATUS_SRC_E = create_vocab(
-    {"ACTIVE": "act", "INACTIVE": "inact", "UNKNOWN": "unk"}
+    {"ACTIVE": "ACT", "INACTIVE": "INACT", "DECOMMISSIONING": "DECOM", "UNKNOWN": "UNK"}
 )
 
 MATURITY_SRC_E = create_vocab(
-    {"MATURE": "mat", "IMMATURE": "imat", "PARTIAL": "part", "UNKNOWN": "unk"}
+    {"MATURE": "MAT", "IMMATURE": "IMAT", "PARTIAL": "PART", "UNKNOWN": "UNK"}
 )
 
-# Category mappings for SRC-D (free-text variants)
+# Category mappings for SRC-D (free-text variants, pass-through)
 CATEGORY_SRC_D = create_vocab(
     {
         "AUTHENTICATION": "auth",
+        "AUTHORIZATION": "authz",
         "ENDPOINT": "endpoint",
         "NETWORK": "net",
+        "NETWORK_ANOMALY": "net-anom",
         "APPLICATION": "app",
         "DATA_ACCESS": "data-access",
+        "DATA_EXFILTRATION": "data-exfil",
         "MALWARE": "malware",
         "POLICY_VIOLATION": "policy-viol",
         "AVAILABILITY": "avail",
         "OTHER": "other",
         "UNKNOWN": "unknown",
     },
-    on_unknown="pass_through"
+    on_unknown="pass_through",
 )
 
-# Category mappings for SRC-E (v2 abbreviated)
+# Category mappings for SRC-E (v2 abbreviated codes, strict failure on unknown)
 CATEGORY_SRC_E = create_vocab(
     {
         "AUTHENTICATION": "AUTHN",
+        "AUTHORIZATION": "AUTHZ",
         "ENDPOINT": "EP",
         "NETWORK": "NET",
+        "NETWORK_ANOMALY": "NET_ANOM",
         "APPLICATION": "APP",
         "DATA_ACCESS": "DACC",
+        "DATA_EXFILTRATION": "EXFIL",
         "MALWARE": "MALW",
         "POLICY_VIOLATION": "POL",
         "AVAILABILITY": "AVAIL",
@@ -86,7 +155,7 @@ CATEGORY_SRC_E = create_vocab(
     }
 )
 
-# Disposition mappings for SRC-D
+# Disposition mappings for SRC-D (free-text variants, pass-through)
 DISPOSITION_SRC_D = create_vocab(
     {
         "TRUE_POSITIVE": "true-positive",
@@ -100,10 +169,10 @@ DISPOSITION_SRC_D = create_vocab(
         "OTHER": "other",
         "UNKNOWN": "unknown",
     },
-    on_unknown="pass_through"
+    on_unknown="pass_through",
 )
 
-# Disposition mappings for SRC-E
+# Disposition mappings for SRC-E (v2 codes, strict failure on unknown)
 DISPOSITION_SRC_E = create_vocab(
     {
         "TRUE_POSITIVE": "TP",

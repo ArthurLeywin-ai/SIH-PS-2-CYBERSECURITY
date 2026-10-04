@@ -40,17 +40,19 @@ class RenderingEngine:
         self.field_provenance: list[FieldProvenance] = []
         self.relationship_provenance: list[RelationshipProvenance] = []
 
-        if self.profile.format == "CSV":
-            self.renderer = CSVRenderer()
-            self.ext = "csv"
-        elif self.profile.format == "JSON":
-            self.renderer = JSONRenderer()
-            self.ext = "json"
-        elif self.profile.format == "JSONL":
-            self.renderer = JSONRenderer()
-            self.ext = "jsonl"
-        else:
-            raise ValueError(f"Unsupported format: {profile.format}")
+        self.csv_renderer = CSVRenderer()
+        self.json_renderer = JSONRenderer()
+
+    def _get_renderer_and_ext(self, family: str) -> tuple[CSVRenderer | JSONRenderer, str]:
+        fmt = self.profile.get_format(family)
+        formats = {
+            "CSV": (self.csv_renderer, "csv"),
+            "JSON": (self.json_renderer, "json"),
+            "JSONL": (self.json_renderer, "jsonl"),
+        }
+        if fmt in formats:
+            return formats[fmt]
+        raise ValueError(f"Unsupported format: {fmt}")
 
     def render_and_write(
         self,
@@ -65,7 +67,8 @@ class RenderingEngine:
         if not records:
             return None
 
-        filename = f"{family}_{self.profile.profile_id.lower()}.{self.ext}"
+        renderer, ext = self._get_renderer_and_ext(family)
+        filename = f"{family}_{self.profile.profile_id.lower()}.{ext}"
         filepath = self.output_root / filename
         relative_path = filepath.name
 
@@ -78,7 +81,7 @@ class RenderingEngine:
             relationship_target_field=relationship_target_field,
         )
 
-        content = self.renderer.render_records(family, records, context)
+        content = renderer.render_records(family, records, context)
 
         self.indexes.extend(context.indexes)
         self.field_provenance.extend(context.field_provenance)

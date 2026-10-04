@@ -121,6 +121,9 @@ class BaseRenderer(abc.ABC):
         if canonical_value is None and mapping and mapping.default_if_missing is not None:
             source_val = mapping.default_if_missing
 
+        ts_format = context.profile.get_timestamp_format(family)
+        tz_name = context.profile.get_timezone(family)
+
         if (
             isinstance(source_val, str)
             and ("T" in source_val and ("Z" in source_val or "+00:00" in source_val))
@@ -130,22 +133,23 @@ class BaseRenderer(abc.ABC):
                 or canonical_field == "profile_effective_start_at_utc"
             )
         ):
-            if context.profile.timestamp_format == "iso_z":
+            if ts_format == "iso_z":
                 source_val = source_val.replace("+00:00", "Z")
-            elif context.profile.timestamp_format == "iso_offset_ms":
+            elif ts_format in ("iso_offset", "iso_offset_ms"):
                 source_val = source_val.replace("Z", "+00:00")
-            elif context.profile.timestamp_format == "local_iana":
+            elif ts_format == "local_iana":
                 from datetime import datetime
+
                 try:
                     import zoneinfo
+
                     dt_str = source_val.replace("Z", "+00:00")
                     dt = datetime.fromisoformat(dt_str)
-                    tz_name = context.profile.timezone or "UTC"
-                    dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name))
+                    dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name or "UTC"))
                     source_val = dt_local.strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     source_val = source_val.replace("+00:00", "").replace("Z", "").replace("T", " ")
-            elif context.profile.timestamp_format == "date_only":
+            elif ts_format == "date_only":
                 source_val = source_val[:10]
 
         if mapping and mapping.vocabulary and isinstance(source_val, str):

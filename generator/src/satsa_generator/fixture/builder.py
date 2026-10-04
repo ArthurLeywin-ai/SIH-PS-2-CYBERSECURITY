@@ -473,90 +473,48 @@ def _build_m3_fixture_internal(
     engine_e = RenderingEngine(source_exports_root, profile_e)
 
     file_manifests = []
+    engines = [engine_a, engine_b, engine_c, engine_d, engine_e]
+    families_to_render = [
+        ("organization", organizations),
+        ("submission", submissions),
+        ("submission_manifest", submission_manifests),
+        ("submission_family", submission_families),
+        ("control_process_reference", control_refs),
+        ("control_process_subject_link", control_links),
+        ("asset", assets),
+        ("monitoring_coverage", coverages),
+        ("alert", alerts),
+        ("case", cases),
+        ("case_alert_link", case_alert_links),
+        ("investigation", investigations),
+        ("escalation", escalations),
+        ("action", actions),
+        ("resolution", resolutions),
+        ("closure", closures),
+        ("exception", exceptions),
+        ("process_change", process_changes),
+    ]
 
-    f_org = engine_a.render_and_write("organization", organizations)
-    if f_org:
-        file_manifests.append(f_org)
-
-    f_sub = engine_b.render_and_write("submission", submissions)
-    if f_sub:
-        file_manifests.append(f_sub)
-
-    f_man = engine_c.render_and_write("submission_manifest", submission_manifests)
-    if f_man:
-        file_manifests.append(f_man)
-
-    f_fam = engine_d.render_and_write("submission_family", submission_families)
-    if f_fam:
-        file_manifests.append(f_fam)
-
-    f_cr = engine_e.render_and_write("control_process_reference", control_refs)
-    if f_cr:
-        file_manifests.append(f_cr)
-
-    f_cl = engine_a.render_and_write("control_process_subject_link", control_links)
-    if f_cl:
-        file_manifests.append(f_cl)
-
-    f_asset = engine_b.render_and_write("asset", assets)
-    if f_asset:
-        file_manifests.append(f_asset)
-
-    f_cov = engine_c.render_and_write("monitoring_coverage", coverages)
-    if f_cov:
-        file_manifests.append(f_cov)
-
-    f_al = engine_d.render_and_write("alert", alerts)
-    if f_al:
-        file_manifests.append(f_al)
-
-    # Render cases with case_alert_links for case -> alerts relationship
-    f_ca = engine_c.render_and_write(
-        "case",
-        cases,
-        relationship_records=case_alert_links,
-        relationship_subject_field="case_id",
-        relationship_object_field="case_id",
-        relationship_target_field="alert_id",
-    )
-    if f_ca:
-        file_manifests.append(f_ca)
-
-    f_cal = engine_c.render_and_write("case_alert_link", case_alert_links)
-    if f_cal:
-        file_manifests.append(f_cal)
-
-    f_inv = engine_a.render_and_write("investigation", investigations)
-    if f_inv:
-        file_manifests.append(f_inv)
-
-    f_esc = engine_b.render_and_write("escalation", escalations)
-    if f_esc:
-        file_manifests.append(f_esc)
-
-    f_act = engine_c.render_and_write("action", actions)
-    if f_act:
-        file_manifests.append(f_act)
-
-    f_res = engine_a.render_and_write("resolution", resolutions)
-    if f_res:
-        file_manifests.append(f_res)
-
-    f_clo = engine_b.render_and_write("closure", closures)
-    if f_clo:
-        file_manifests.append(f_clo)
-
-    f_exc = engine_c.render_and_write("exception", exceptions)
-    if f_exc:
-        file_manifests.append(f_exc)
-
-    f_pc = engine_a.render_and_write("process_change", process_changes)
-    if f_pc:
-        file_manifests.append(f_pc)
+    for engine in engines:
+        for fam_name, rec_list in families_to_render:
+            if fam_name == "case":
+                f_rendered = engine.render_and_write(
+                    "case",
+                    cases,
+                    relationship_records=case_alert_links,
+                    relationship_subject_field="case_id",
+                    relationship_object_field="case_id",
+                    relationship_target_field="alert_id",
+                )
+            else:
+                f_rendered = engine.render_and_write(fam_name, rec_list)
+            if f_rendered:
+                file_manifests.append(f_rendered)
 
     # Write oracle and provenance metadata
     # Oracle is written for validation (parse-back), not for rendering
     import json as json_module
+
     oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
     oracle_root.mkdir(parents=True, exist_ok=True)
     for prefix in ["src_a", "src_b", "src_c", "src_d", "src_e"]:

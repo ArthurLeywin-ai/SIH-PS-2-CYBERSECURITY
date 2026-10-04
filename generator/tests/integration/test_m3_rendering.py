@@ -1,8 +1,8 @@
 """Integration tests for Milestone 3 (Source Profiles and Canonical Oracle)."""
 
-from pathlib import Path
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -142,9 +142,7 @@ def test_corruption_missing_relationship(
     lines = content.split("\n")
     if len(lines) > 1 and lines[1]:
         parts = lines[1].split(",")
-        parts[2] = (
-            ""  # org_id is 3rd col (asset_id, source_asset_id, organization_id)
-        )
+        parts[2] = ""  # org_id is 3rd col (asset_id, source_asset_id, organization_id)
         lines[1] = ",".join(parts)
         csv_file.write_text("\n".join(lines), encoding="utf-8")
 
@@ -158,7 +156,6 @@ def test_corruption_wrong_related_id(
     tmp_path: Path, fixture_config_path: Path, master_seed: bytes
 ) -> None:
     """Test - wrong related ID (using another valid UUID)."""
-    import uuid
 
     result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
     csv_file = result.operational_root / "submission_src-b.csv"
@@ -183,6 +180,7 @@ def test_corruption_list_relationship_missing_member(
 ) -> None:
     """Test - missing member from relationship list fails."""
     import json
+
     result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
     json_file = result.operational_root / "case_src-c.json"
 
@@ -206,7 +204,7 @@ def test_corruption_list_relationship_extra_member(
 ) -> None:
     """Test - extra wrong member in relationship list fails."""
     import json
-    import uuid
+
     result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
     json_file = result.operational_root / "case_src-c.json"
 
@@ -250,17 +248,18 @@ def test_renderer_independence_from_oracle(
 ) -> None:
     """
     Independence test: Renderer follows operational data, not oracle.
-    
+
     This test constructs operational records and an independent oracle with
     intentionally altered relationship expectations. It verifies that the
     renderer produces source artifacts matching the operational data,
     not the altered oracle.
     """
-    from satsa_generator.config.models import GeneratorConfig, load_config
-    from satsa_generator.seeds.manager import SeedManager
-    from satsa_generator.ids.service import IDService
-    from satsa_generator.fixture.builder import _generate_m2_records, validate_m2_fixture_records
     from uuid import UUID
+
+    from satsa_generator.config.models import load_config
+    from satsa_generator.fixture.builder import _generate_m2_records, validate_m2_fixture_records
+    from satsa_generator.ids.service import IDService
+    from satsa_generator.seeds.manager import SeedManager
 
     config = load_config(fixture_config_path)
     seeds = SeedManager(master_seed)
@@ -391,17 +390,20 @@ def test_vocabulary_pass_through_unknown(
     # SRC-D uses abbreviated field names
     assert "ale_sev" in first_record, "SRC-D should have ale_sev field"
     # The value should be a valid mapped value (not an error)
-    assert first_record["ale_sev"] in ["standard", "elevated", "high", "unknown"], \
+    assert first_record["ale_sev"] in ["standard", "elevated", "high", "unknown"], (
         f"Unexpected severity value: {first_record['ale_sev']}"
+    )
 
     # Now test that unknown values are preserved (pass-through)
     # We can't easily inject unknown values without modifying the fixture,
     # but we can verify the vocabulary mapping is configured correctly
     from satsa_generator.profiles.catalog import get_profile
+
     profile_d = get_profile("SRC-D")
     alert_mapping = profile_d.family_mappings.get("alert", {})
     sev_mapping = alert_mapping.get("severity")
     assert sev_mapping is not None
     assert sev_mapping.vocabulary is not None
-    assert sev_mapping.vocabulary.on_unknown == "pass_through", \
+    assert sev_mapping.vocabulary.on_unknown == "pass_through", (
         "SRC-D severity should have on_unknown=pass_through"
+    )

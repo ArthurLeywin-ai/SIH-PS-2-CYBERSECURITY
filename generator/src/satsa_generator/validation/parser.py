@@ -17,13 +17,8 @@ def parse_and_validate(
 ) -> None:
     """Parse generated source artifacts back into canonical state and validate against oracle."""
     profile = get_profile(profile_id)
-    ext = profile.format.lower()
-    if ext == "jsonl":
-        ext = "jsonl"
-    elif ext == "json":
-        ext = "json"
-    else:
-        ext = "csv"
+    fmt = profile.get_format(evidence_family)
+    ext = fmt.lower()
 
     source_path = source_exports_root / f"{evidence_family}_{profile_id.lower()}.{ext}"
     oracle_path = oracle_root / f"{profile_id.lower().replace('-', '_')}_oracle.json"
@@ -140,7 +135,7 @@ def parse_and_validate(
                         raw_set = {str(x) for x in raw_val}
                         exp_set = {str(x) for x in expected_val}
                         if raw_set == exp_set and len(raw_val) == len(expected_val):
-                            continue # bypass further comparison
+                            continue  # bypass further comparison
 
                         err_msg = (
                             f"Parse-back failure for {canonical_id} field {can_field}: "
@@ -166,18 +161,21 @@ def parse_and_validate(
                         or can_field.endswith("at")
                         or can_field == "profile_effective_start_at_utc"
                     ):
-                        if profile.timestamp_format == "iso_z" and "+00:00" in expected_val:
+                        ts_format = profile.get_timestamp_format(evidence_family)
+                        tz_name = profile.get_timezone(evidence_family)
+                        if ts_format == "iso_z" and "+00:00" in expected_val:
                             expected_val = expected_val.replace("+00:00", "Z")
-                        elif profile.timestamp_format == "iso_offset_ms":
+                        elif ts_format in ("iso_offset", "iso_offset_ms"):
                             expected_val = expected_val.replace("Z", "+00:00")
-                        elif profile.timestamp_format == "local_iana":
+                        elif ts_format == "local_iana":
                             from datetime import datetime
+
                             try:
                                 import zoneinfo
+
                                 dt_str = expected_val.replace("Z", "+00:00")
                                 dt = datetime.fromisoformat(dt_str)
-                                tz_name = profile.timezone or "UTC"
-                                dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name))
+                                dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name or "UTC"))
                                 expected_val = dt_local.strftime("%Y-%m-%d %H:%M:%S")
                             except Exception:
                                 expected_val = (
@@ -185,7 +183,7 @@ def parse_and_validate(
                                     .replace("Z", "")
                                     .replace("T", " ")
                                 )
-                        elif profile.timestamp_format == "date_only":
+                        elif ts_format == "date_only":
                             expected_val = expected_val[:10]
             if raw_val != expected_val:
                 err_msg = (
@@ -231,21 +229,27 @@ def parse_and_validate(
                             raw_val = json.loads(raw_val)
 
                     if not isinstance(raw_val, list):
-                        raise ValueError(
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: expected list, got '{type(raw_val)}'"
+                        msg = (
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
+                            f"expected list, got '{type(raw_val)}'"
                         )
+                        raise ValueError(msg)
 
                     raw_set = {str(x) for x in raw_val}
                     exp_set = {str(x) for x in expected_rel}
                     if raw_set != exp_set:
-                        raise ValueError(
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: expected {exp_set}, got {raw_set}"
+                        msg = (
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
+                            f"expected {exp_set}, got {raw_set}"
                         )
+                        raise ValueError(msg)
 
                     if len(raw_val) != len(expected_rel):
-                        raise ValueError(
-                            f"Parse-back rel failure {canonical_id} rel {rel_name}: expected length {len(expected_rel)}, got {len(raw_val)}"
+                        msg = (
+                            f"Parse-back rel failure {canonical_id} rel {rel_name}: "
+                            f"expected length {len(expected_rel)}, got {len(raw_val)}"
                         )
+                        raise ValueError(msg)
                 else:
                     if str(raw_val) != str(expected_rel):
                         err_msg2 = (
@@ -253,7 +257,12 @@ def parse_and_validate(
                             f"expected '{expected_rel}', got '{raw_val}'"
                         )
                         raise ValueError(err_msg2)
-            elif expected_rel is not None and fmap and fmap.is_present:
+            elif (
+                expected_rel is not None
+                and expected_rel != []
+                and expected_rel != set()
+                and (fmap is None or fmap.is_present)
+            ):
                 raise ValueError(
                     f"Parse-back rel failure {canonical_id} rel {rel_name}: "
                     f"expected '{expected_rel}', got missing"
