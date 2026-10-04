@@ -92,7 +92,16 @@ class BaseRenderer(abc.ABC):
             elif context.profile.timestamp_format == "iso_offset_ms":
                 source_val = source_val.replace("Z", "+00:00")
             elif context.profile.timestamp_format == "local_iana":
-                source_val = source_val.replace("+00:00", "").replace("Z", "").replace("T", " ")
+                from datetime import datetime
+                try:
+                    import zoneinfo
+                    dt_str = source_val.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(dt_str)
+                    tz_name = context.profile.timezone or "UTC"
+                    dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name))
+                    source_val = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    source_val = source_val.replace("+00:00", "").replace("Z", "").replace("T", " ")
             elif context.profile.timestamp_format == "date_only":
                 source_val = source_val[:10]
 

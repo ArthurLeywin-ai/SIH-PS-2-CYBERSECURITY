@@ -116,10 +116,14 @@ def parse_and_validate(
                     raw_val = vocab_map[raw_val]
                 else:
                     # Attempt string-to-int conversion if needed
+                    matched = False
                     for k, v in vocab_map.items():
                         if str(k) == str(raw_val):
                             raw_val = v
+                            matched = True
                             break
+                    if not matched and fmap.vocabulary.on_unknown == "fail":
+                        raise ValueError(f"Unmapped vocabulary value during parse-back: {raw_val}")
 
             # Compare against oracle expectation
             if expected_val is None and fmap and fmap.default_if_missing is not None:
@@ -167,11 +171,20 @@ def parse_and_validate(
                         elif profile.timestamp_format == "iso_offset_ms":
                             expected_val = expected_val.replace("Z", "+00:00")
                         elif profile.timestamp_format == "local_iana":
-                            expected_val = (
-                                expected_val.replace("+00:00", "")
-                                .replace("Z", "")
-                                .replace("T", " ")
-                            )
+                            from datetime import datetime
+                            try:
+                                import zoneinfo
+                                dt_str = expected_val.replace("Z", "+00:00")
+                                dt = datetime.fromisoformat(dt_str)
+                                tz_name = profile.timezone or "UTC"
+                                dt_local = dt.astimezone(zoneinfo.ZoneInfo(tz_name))
+                                expected_val = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                            except Exception:
+                                expected_val = (
+                                    expected_val.replace("+00:00", "")
+                                    .replace("Z", "")
+                                    .replace("T", " ")
+                                )
                         elif profile.timestamp_format == "date_only":
                             expected_val = expected_val[:10]
             if raw_val != expected_val:
