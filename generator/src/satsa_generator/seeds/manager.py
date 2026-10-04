@@ -158,10 +158,7 @@ class SeedManager:
 
     def public_ledger(self) -> dict[str, str]:
         """Return a sorted label-to-fingerprint diagnostic ledger."""
-        return {
-            label: self._registry[label][0]
-            for label in sorted(self._registry)
-        }
+        return {label: self._registry[label][0] for label in sorted(self._registry)}
 
     def private_ledger_hash(self) -> str:
         """Hash registered labels and full child entropy without exposing it."""
@@ -208,7 +205,4 @@ class SeedManager:
 
     def __repr__(self) -> str:
         alias = f"{self._public_alias[:16]}..." if self._public_alias else "unassigned"
-        return (
-            f"SeedManager(alias={alias}, "
-            f"streams={len(self._registry)})"
-        )
+        return f"SeedManager(alias={alias}, streams={len(self._registry)})"

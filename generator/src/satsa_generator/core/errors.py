@@ -59,6 +59,14 @@ class SchemaContractError(ValidationError):
     """
 
 
+class RelationshipIntegrityError(ValidationError):
+    """Raised when referential or ownership integrity is violated across records."""
+
+
+class TemporalIntegrityError(ValidationError):
+    """Raised when timestamp ordering or temporal interval consistency is violated."""
+
+
 class LeakageError(GeneratorError):
     """Raised when ground-truth information appears in operational output.
 

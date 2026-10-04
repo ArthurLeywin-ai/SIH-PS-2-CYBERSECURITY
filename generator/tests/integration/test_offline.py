@@ -14,7 +14,5 @@ def test_fixture_build_does_not_require_network(
     monkeypatch.setattr(socket, "create_connection", blocked)
     monkeypatch.setattr(socket.socket, "connect", blocked)
 
-    result = build_fixture(
-        fixture_config_path, master_seed, output_root=tmp_path / "offline"
-    )
+    result = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "offline")
     assert result.manifest_path.is_file()

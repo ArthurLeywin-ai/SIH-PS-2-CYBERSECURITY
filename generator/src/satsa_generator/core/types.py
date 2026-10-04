@@ -14,6 +14,7 @@ import enum
 # Dataset and package enums
 # ---------------------------------------------------------------------------
 
+
 class PackageDomain(enum.StrEnum):
     """Physical separation domains for generated packages."""
 
@@ -45,6 +46,7 @@ class SplitID(enum.StrEnum):
 # Period and maturity
 # ---------------------------------------------------------------------------
 
+
 class PeriodMaturity(enum.StrEnum):
     """Period maturity states from DATASET_GENERATION_SPEC §6.2."""
 
@@ -66,6 +68,7 @@ class FamilyPresence(enum.StrEnum):
 # ---------------------------------------------------------------------------
 # Evidence families
 # ---------------------------------------------------------------------------
+
 
 class EvidenceFamily(enum.StrEnum):
     """Operational evidence families from DATA_SCHEMA.md."""
@@ -93,6 +96,7 @@ class EvidenceFamily(enum.StrEnum):
 # ---------------------------------------------------------------------------
 # Severity and controlled vocabularies
 # ---------------------------------------------------------------------------
+
 
 class Severity(enum.StrEnum):
     """Canonical severity vocabulary from DATA_SCHEMA.md §18.1."""
@@ -210,6 +214,7 @@ class ValueState(enum.StrEnum):
 # ---------------------------------------------------------------------------
 # Source profile identifiers
 # ---------------------------------------------------------------------------
+
 
 class SourceProfile(enum.StrEnum):
     """Source layout profile identifiers from DATASET_GENERATION_SPEC §14."""

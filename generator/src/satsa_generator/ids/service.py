@@ -85,8 +85,9 @@ class IDService:
         logical_key = "/".join(key_parts)
         return str(uuid.uuid5(self._namespace, logical_key))
 
-    def generate_source_id(self, org_id: str, source_system: str, record_type: str,
-                           ordinal: int) -> str:
+    def generate_source_id(
+        self, org_id: str, source_system: str, record_type: str, ordinal: int
+    ) -> str:
         """Generate a deterministic source-native-style ID.
 
         Source IDs look like operational system identifiers but are fully

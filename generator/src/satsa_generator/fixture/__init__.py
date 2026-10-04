@@ -1,5 +1,57 @@
-"""Minimal deterministic Milestone 1 fixture."""
+"""Operational base-world fixtures for Milestones 1 and 2."""
 
-from satsa_generator.fixture.builder import FixtureBuildResult, build_fixture
+from satsa_generator.fixture.builder import (
+    FixtureBuildResult,
+    build_fixture,
+    build_m2_fixture,
+    validate_fixture_records,
+    validate_m2_fixture_records,
+)
+from satsa_generator.fixture.models import (
+    ActionRecord,
+    AlertRecord,
+    AssetRecord,
+    CaseAlertLinkRecord,
+    CaseRecord,
+    ClosureRecord,
+    ControlProcessReferenceRecord,
+    ControlProcessSubjectLinkRecord,
+    EscalationRecord,
+    ExceptionRecord,
+    FixtureManifest,
+    InvestigationRecord,
+    MonitoringCoverageRecord,
+    OrganizationRecord,
+    ProcessChangeRecord,
+    ResolutionRecord,
+    SubmissionFamilyDeclarationRecord,
+    SubmissionManifestRecord,
+    SubmissionRecord,
+)
 
-__all__ = ["FixtureBuildResult", "build_fixture"]
+__all__ = [
+    "ActionRecord",
+    "AlertRecord",
+    "AssetRecord",
+    "CaseAlertLinkRecord",
+    "CaseRecord",
+    "ClosureRecord",
+    "ControlProcessReferenceRecord",
+    "ControlProcessSubjectLinkRecord",
+    "EscalationRecord",
+    "ExceptionRecord",
+    "FixtureBuildResult",
+    "FixtureManifest",
+    "InvestigationRecord",
+    "MonitoringCoverageRecord",
+    "OrganizationRecord",
+    "ProcessChangeRecord",
+    "ResolutionRecord",
+    "SubmissionFamilyDeclarationRecord",
+    "SubmissionManifestRecord",
+    "SubmissionRecord",
+    "build_fixture",
+    "build_m2_fixture",
+    "validate_fixture_records",
+    "validate_m2_fixture_records",
+]

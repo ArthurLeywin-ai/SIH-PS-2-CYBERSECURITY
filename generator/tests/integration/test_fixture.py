@@ -18,12 +18,8 @@ def _tree_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-def test_fixture_builds_with_required_schema_fields(
-    tmp_path, fixture_config_path, master_seed
-):
-    result = build_fixture(
-        fixture_config_path, master_seed, output_root=tmp_path / "fixture"
-    )
+def test_fixture_builds_with_required_schema_fields(tmp_path, fixture_config_path, master_seed):
+    result = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "fixture")
     files = _tree_bytes(result.operational_root)
 
     assert set(files) == {
@@ -65,9 +61,7 @@ def test_fixture_builds_with_required_schema_fields(
     assert {"manifest_id", "submission_id", "manifest_sha256"} <= set(manifests[0])
 
 
-def test_fixture_serialized_output_is_identical(
-    tmp_path, fixture_config_path, master_seed
-):
+def test_fixture_serialized_output_is_identical(tmp_path, fixture_config_path, master_seed):
     first = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "a")
     second = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "b")
 
@@ -79,23 +73,16 @@ def test_different_seed_changes_serialized_output(
     tmp_path, fixture_config_path, master_seed, different_master_seed
 ):
     first = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "a")
-    second = build_fixture(
-        fixture_config_path, different_master_seed, output_root=tmp_path / "b"
-    )
+    second = build_fixture(fixture_config_path, different_master_seed, output_root=tmp_path / "b")
 
     assert first.tree_sha256 != second.tree_sha256
     assert _tree_bytes(first.operational_root) != _tree_bytes(second.operational_root)
 
 
-def test_fixture_contains_no_truth_or_detector_fields(
-    tmp_path, fixture_config_path, master_seed
-):
-    result = build_fixture(
-        fixture_config_path, master_seed, output_root=tmp_path / "fixture"
-    )
+def test_fixture_contains_no_truth_or_detector_fields(tmp_path, fixture_config_path, master_seed):
+    result = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "fixture")
     text = "\n".join(
-        content.decode("utf-8")
-        for content in _tree_bytes(result.operational_root).values()
+        content.decode("utf-8") for content in _tree_bytes(result.operational_root).values()
     ).lower()
 
     for forbidden in (
@@ -112,12 +99,8 @@ def test_fixture_contains_no_truth_or_detector_fields(
     assert not (result.output_root / "evaluation_private").exists()
 
 
-def test_invalid_fixture_relationship_fails_loudly(
-    tmp_path, fixture_config_path, master_seed
-):
-    result = build_fixture(
-        fixture_config_path, master_seed, output_root=tmp_path / "fixture"
-    )
+def test_invalid_fixture_relationship_fails_loudly(tmp_path, fixture_config_path, master_seed):
+    result = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "fixture")
     organization_data = json.loads(
         (result.operational_root / "organizations.json").read_text(encoding="utf-8")
     )
@@ -125,9 +108,7 @@ def test_invalid_fixture_relationship_fails_loudly(
         (result.operational_root / "submissions.json").read_text(encoding="utf-8")
     )
     manifest_data = json.loads(
-        (result.operational_root / "submission_manifests.json").read_text(
-            encoding="utf-8"
-        )
+        (result.operational_root / "submission_manifests.json").read_text(encoding="utf-8")
     )
     from satsa_generator.fixture.models import (
         SubmissionManifestRecord,
@@ -136,9 +117,7 @@ def test_invalid_fixture_relationship_fails_loudly(
 
     organizations = [OrganizationRecord.model_validate(row) for row in organization_data]
     submissions = [SubmissionRecord.model_validate(row) for row in submission_data]
-    manifests = [
-        SubmissionManifestRecord.model_validate(row) for row in manifest_data
-    ]
+    manifests = [SubmissionManifestRecord.model_validate(row) for row in manifest_data]
     invalid_submission = submissions[0].model_copy(
         update={"organization_id": "00000000-0000-0000-0000-000000000000"}
     )
@@ -148,9 +127,7 @@ def test_invalid_fixture_relationship_fails_loudly(
         validate_fixture_records(organizations, submissions, manifests)
 
 
-def test_existing_output_is_not_silently_overwritten(
-    tmp_path, fixture_config_path, master_seed
-):
+def test_existing_output_is_not_silently_overwritten(tmp_path, fixture_config_path, master_seed):
     output = tmp_path / "fixture"
     output.mkdir()
     (output / "unrelated.txt").write_text("preserve me", encoding="utf-8")

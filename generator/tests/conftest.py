@@ -10,11 +10,7 @@ import pytest
 @pytest.fixture
 def fixture_config_path() -> Path:
     return (
-        Path(__file__).resolve().parents[1]
-        / "config"
-        / "public"
-        / "base"
-        / "fixture_config.json"
+        Path(__file__).resolve().parents[1] / "config" / "public" / "base" / "fixture_config.json"
     )
 
 

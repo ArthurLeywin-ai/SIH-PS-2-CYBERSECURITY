@@ -14,9 +14,7 @@ from satsa_generator.fixture.models import (
 def test_serialized_fixture_round_trips_through_strict_contract_models(
     tmp_path, fixture_config_path, master_seed
 ):
-    result = build_fixture(
-        fixture_config_path, master_seed, output_root=tmp_path / "fixture"
-    )
+    result = build_fixture(fixture_config_path, master_seed, output_root=tmp_path / "fixture")
 
     family_models = {
         "organizations.json": OrganizationRecord,
@@ -24,9 +22,7 @@ def test_serialized_fixture_round_trips_through_strict_contract_models(
         "submission_manifests.json": SubmissionManifestRecord,
     }
     for filename, model in family_models.items():
-        rows = json.loads(
-            (result.operational_root / filename).read_text(encoding="utf-8")
-        )
+        rows = json.loads((result.operational_root / filename).read_text(encoding="utf-8"))
         assert rows
         assert all(model.model_validate(row) for row in rows)
 

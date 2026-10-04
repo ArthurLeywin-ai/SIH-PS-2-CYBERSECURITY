@@ -42,9 +42,7 @@ def test_unnamed_stream_is_rejected(master_seed):
 
 
 def test_known_answer_for_pinned_algorithm(master_seed):
-    assert SeedManager(master_seed).verify_known_answer(
-        STREAM, 3353372658309250958
-    )
+    assert SeedManager(master_seed).verify_known_answer(STREAM, 3353372658309250958)
 
 
 def test_public_ledger_is_sorted_and_contains_no_seed(master_seed):

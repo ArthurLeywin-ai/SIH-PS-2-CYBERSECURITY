@@ -61,9 +61,7 @@ class VersionTuple:
 
     def sha256(self) -> str:
         """SHA-256 hash of the canonical JSON representation."""
-        return hashlib.sha256(
-            self.canonical_json().encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -94,9 +92,7 @@ class BuildContext:
     evaluation_root: Path
     binding_root: Path
     dataset_namespace: str
-    created_at_utc: datetime = field(
-        default_factory=lambda: datetime.now(UTC)
-    )
+    created_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

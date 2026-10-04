@@ -24,10 +24,7 @@ def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for the generator CLI."""
     parser = argparse.ArgumentParser(
         prog="satsa-gen",
-        description=(
-            "SAT-SA Synthetic Dataset Generator — "
-            "deterministic, offline, reproducible."
-        ),
+        description=("SAT-SA Synthetic Dataset Generator — deterministic, offline, reproducible."),
     )
     parser.add_argument(
         "--version",
@@ -84,12 +81,18 @@ def create_parser() -> argparse.ArgumentParser:
 
     fixture_parser = subparsers.add_parser(
         "build-fixture",
-        help="Build the tiny deterministic Milestone 1 operational fixture.",
+        help="Build the deterministic operational fixture (Milestone 1 or Milestone 2).",
     )
     fixture_parser.add_argument(
         "config_path",
         type=Path,
         help="Path to the deterministic fixture configuration.",
+    )
+    fixture_parser.add_argument(
+        "--milestone",
+        choices=["m1", "m2"],
+        default="m2",
+        help="Milestone fixture target (m1 or m2, default: m2).",
     )
     fixture_parser.add_argument(
         "--seed",
@@ -158,7 +161,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 
 def cmd_build_fixture(args: argparse.Namespace) -> int:
-    """Build the operational-only deterministic Milestone 1 fixture."""
+    """Build the operational-only deterministic fixture."""
     from satsa_generator.fixture.builder import build_fixture, parse_master_seed_hex
 
     seed_hex = args.seed or os.environ.get("SATSA_MASTER_SEED")
@@ -168,17 +171,22 @@ def cmd_build_fixture(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    milestone = getattr(args, "milestone", "m2")
     try:
         result = build_fixture(
             args.config_path,
             parse_master_seed_hex(seed_hex),
             output_root=args.output,
+            milestone=milestone,
         )
-        print("✓ Milestone 1 fixture built.")
+        if milestone == "m1":
+            print("✓ Milestone 1 foundation fixture built.")
+        else:
+            print("✓ M2 small development/base-world fixture built.")
         print(f"  Operational root: {result.operational_root}")
         print(f"  Tree SHA-256: {result.tree_sha256}")
         print(f"  Records: {result.record_counts}")
-        print("  Ground truth: not generated")
+        print("  Ground truth: not generated (M2 base-world only)")
         return 0
     except Exception as exc:
         print(f"✗ Fixture build failed: {exc}", file=sys.stderr)

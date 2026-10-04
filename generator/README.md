@@ -44,9 +44,16 @@ pytest
 satsa-gen validate-config config/public/base/fixture_config.json
 satsa-gen freeze-config config/public/base/fixture_config.json
 
-# Build the tiny Milestone 1 fixture
+# Build the Milestone 2 operational base-world fixture (default)
 satsa-gen build-fixture config/public/base/fixture_config.json \
   --seed 1111111111111111111111111111111111111111111111111111111111111111 \
+  --milestone m2 \
+  --output ./artifacts/m2-fixture
+
+# Build the minimal Milestone 1 foundation fixture
+satsa-gen build-fixture config/public/base/fixture_config.json \
+  --seed 1111111111111111111111111111111111111111111111111111111111111111 \
+  --milestone m1 \
   --output ./artifacts/m1-fixture
 
 # Other CLI usage
@@ -54,15 +61,30 @@ satsa-gen --help
 ```
 
 The output directory must be absent or empty. The builder will not silently
-overwrite artifacts. The fixture writes only:
+overwrite artifacts. The M2 fixture writes all 18 canonical operational evidence families:
 
 ```text
-artifacts/m1-fixture/
+artifacts/m2-fixture/
   operational_evidence/
     fixture_manifest.json
     organizations.json
-    submission_manifests.json
     submissions.json
+    submission_manifests.json
+    submission_evidence_families.json
+    control_process_references.json
+    control_process_subject_links.json
+    assets.json
+    monitoring_coverage.json
+    alerts.json
+    cases.json
+    case_alert_links.json
+    investigations.json
+    escalations.json
+    actions.json
+    resolutions.json
+    closures.json
+    exceptions.json
+    process_changes.json
 ```
 
 The published seed above is for the development fixture only. Validation and
@@ -72,25 +94,26 @@ held-out seeds must not be committed or exposed.
 
 - **Deterministic:** Same seed + same version = identical output bytes.
 - **Offline:** No network calls. All dependencies are local.
-- **Fail-loud:** Invalid config or impossible states halt generation.
-- **Truth-isolated:** No ground-truth leakage into operational evidence.
-- **Detector-independent:** Generator never imports SAT-SA analytics config.
+- **Fail-loud:** Invalid config, referential breaks, or temporal violations halt generation.
+- **Truth-isolated:** Zero ground-truth leakage, scenario IDs, or detector markers in operational evidence.
+- **Detector-independent:** Generator never imports SAT-SA analytics config or detector thresholds.
 
-## Reproducibility
+## Reproducibility & Integrity
 
-The fixture uses:
+The generator and fixture builder use:
 
-- HMAC-SHA-256 child-seed derivation;
-- stable named random streams;
+- HMAC-SHA-256 child-seed derivation from master seed;
+- Stable named random streams (`SeedManager`);
 - NumPy `SeedSequence` with `PCG64DXSM`;
-- UUIDv5 deterministic identifiers;
-- sorted records, sorted JSON keys, fixed separators, UTF-8, and final newlines;
-- deterministic build metadata rather than wall-clock timestamps;
-- per-file SHA-256 values and a deterministic package-tree hash.
+- Deterministic UUIDv5 identifiers partitioned by domain namespace;
+- Referential integrity validation across all foreign keys;
+- Temporal ordering integrity checks (`created_at <= assigned_at <= started_at <= resolved_at <= closed_at`);
+- Sorted records, sorted JSON keys, fixed separators, UTF-8, and final newlines;
+- Deterministic build metadata rather than wall-clock timestamps;
+- Per-file SHA-256 values and a deterministic package-tree hash.
 
 Two clean builds using the same source, configuration, dependency versions,
-and master seed must be byte-identical. Changing the seed changes generated
-profile/submission values and therefore changes the package-tree hash.
+and master seed are byte-identical.
 
 ## Repository Structure
 
@@ -104,39 +127,34 @@ generator/
     seeds/         # Master/child seed derivation, RNG registry
     ids/           # Deterministic UUID/source-ID service
     cli/           # Command-line interface
-    fixture/       # Tiny schema-shaped Milestone 1 fixture
+    fixture/       # M1 and M2 schema-valid operational fixture builders & models
   tests/
-    unit/          # Unit tests
-    contract/      # DATA_SCHEMA.md contract tests
-    integration/   # Integration tests
+    unit/          # Unit tests for core services and builder
+    contract/      # Strict DATA_SCHEMA.md contract round-trip tests
+    integration/   # Integration, referential, temporal, offline, and reproducibility tests
+    property/      # Hypothesis property tests
 ```
 
 ## Current Status
 
-**Milestone 1 foundation implemented and tested.**
+**Milestone 2 (Small Schema-Valid Base World) implemented and tested.**
 
 Implemented:
 
-- strict immutable JSON/TOML configuration loading and hashing;
-- fail-loud validation, unknown-key rejection, portable output-path checks,
-  and detector-key rejection;
-- deterministic named seed streams and known-answer testing;
-- deterministic canonical/source identifier service;
-- immutable build context and version identity;
-- a tiny schema-shaped organization/submission/manifest fixture;
-- deterministic operational-only serialization and hashes;
-- unit and integration tests, including offline and byte-identity checks.
+- Complete Pydantic schemas for all 18 operational evidence families per `DATA_SCHEMA.md`;
+- Base-world generation logic populating operational entities across organizations, periods, assets, coverages, alerts, cases, triage investigations, escalations, remediation actions, resolutions, closures, exceptions, and process changes;
+- Comprehensive referential integrity validator (`validate_m2_fixture_records`);
+- Temporal ordering validator enforcing causal lifecycle consistency;
+- Offline, byte-identical deterministic serialization with SHA-256 manifest and tree hash;
+- Comprehensive test suite (51 passing unit, contract, integration, temporal, and reproducibility tests).
 
-Intentionally not implemented yet:
+Intentionally not implemented yet (Milestone 3+ scope):
 
-- the full 15-organization population or multi-period simulation;
-- operational evidence families beyond the minimal foundation records;
-- scenarios, legitimate controls, or data-quality mutations;
-- source renderers or the canonical/provenance oracle;
-- hidden truth, evaluation packages, dataset splits, or benchmarks;
-- SAT-SA ingestion, analytics, findings, prioritization, ML, backend, or UI.
-
-This fixture is a foundation test artifact, not the complete synthetic dataset.
+- Source renderers (SRC-A through SRC-E CSV/JSON format exporters);
+- Canonical oracle and provenance graph;
+- Scenarios, legitimate controls, or data-quality mutations (M4);
+- Hidden ground-truth and evaluation answer key packages (M4);
+- Full multi-organization large-scale dataset generation.
 
 ## License
 

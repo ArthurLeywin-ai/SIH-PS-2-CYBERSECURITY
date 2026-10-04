@@ -23,18 +23,20 @@ from satsa_generator.core.types import BenchmarkTier, SourceProfile, SplitID
 # Forbidden detector configuration keys
 # -----------------------------------------------------------------------
 
-FORBIDDEN_CONFIG_KEYS: frozenset[str] = frozenset({
-    "detector_threshold",
-    "finding_priority_weight",
-    "anomaly_contamination",
-    "model_parameter",
-    "expected_score",
-    "risk_score",
-    "detection_rule",
-    "priority_band",
-    "ml_threshold",
-    "anomaly_threshold",
-})
+FORBIDDEN_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "detector_threshold",
+        "finding_priority_weight",
+        "anomaly_contamination",
+        "model_parameter",
+        "expected_score",
+        "risk_score",
+        "detection_rule",
+        "priority_band",
+        "ml_threshold",
+        "anomaly_threshold",
+    }
+)
 
 
 class StrictFrozenModel(BaseModel):
@@ -234,9 +236,7 @@ class GeneratorConfig(StrictFrozenModel):
 
     @field_validator("periods")
     @classmethod
-    def validate_unique_period_ids(
-        cls, v: tuple[PeriodConfig, ...]
-    ) -> tuple[PeriodConfig, ...]:
+    def validate_unique_period_ids(cls, v: tuple[PeriodConfig, ...]) -> tuple[PeriodConfig, ...]:
         """Ensure period IDs are unique."""
         ids = [p.period_id for p in v]
         if len(ids) != len(set(ids)):
@@ -269,9 +269,7 @@ class GeneratorConfig(StrictFrozenModel):
 
     def config_hash(self) -> str:
         """SHA-256 of the canonical JSON configuration."""
-        return hashlib.sha256(
-            self.canonical_json().encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
 
 def _scan_for_forbidden_keys(data: dict[str, Any], path: str) -> None:
