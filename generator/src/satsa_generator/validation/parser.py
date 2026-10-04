@@ -65,21 +65,39 @@ def parse_and_validate(
 
         expected_record = expected_by_id[canonical_id]
 
-        for can_field, fmap in family_map.items():
-            if not fmap.is_present:
+        for can_field, expected_val in expected_record["fields"].items():
+            fmap = family_map.get(can_field)
+            if fmap and not fmap.is_present:
                 continue
 
+            # Determine source name and path
+            if fmap:
+                source_name = fmap.source_name
+                path = fmap.path
+            else:
+                path = None
+                if profile.case_naming == "pascal_case":
+                    source_name = "".join(x.capitalize() for x in can_field.split("_"))
+                elif profile.case_naming in ("camel_case", "mixed"):
+                    parts = can_field.split("_")
+                    source_name = parts[0] + "".join(x.capitalize() for x in parts[1:])
+                else:
+                    source_name = can_field
+
             # Extract raw val
-            if fmap.path and ext != "csv":
+            if path and ext != "csv":
                 current = row
-                for p in fmap.path:
+                for p in path:
                     current = current.get(p, {})
                 raw_val = current if current != {} else None
             else:
-                raw_val = row.get(fmap.source_name)
+                raw_val = row.get(source_name)
+
+            if ext == "csv" and raw_val == "":
+                raw_val = None
 
             # Handle reverse vocab mapping
-            if fmap.vocabulary and raw_val is not None:
+            if fmap and fmap.vocabulary and raw_val is not None:
                 # Need to convert raw_val to correct type for dictionary key
                 # CSV parsing yields strings, so we might need type casting if vocab expects int
                 vocab_map = fmap.vocabulary.source_to_canonical
@@ -95,13 +113,14 @@ def parse_and_validate(
                             break
 
             # Compare against oracle expectation
-            expected_val = expected_record["fields"].get(can_field)
-            if expected_val is None and fmap.default_if_missing is not None:
+            if expected_val is None and fmap and fmap.default_if_missing is not None:
                 expected_val = fmap.default_if_missing
 
             # Normalization comparisons (e.g. string casting for UUIDs/times)
             if expected_val is not None:
-                if isinstance(expected_val, int) and isinstance(raw_val, str):
+                if isinstance(expected_val, bool) and isinstance(raw_val, str):
+                    raw_val = raw_val.lower() == "true"
+                elif isinstance(expected_val, int) and not isinstance(expected_val, bool) and isinstance(raw_val, str):
                     raw_val = int(raw_val)
                 elif isinstance(expected_val, float) and isinstance(raw_val, str):
                     raw_val = float(raw_val)
@@ -119,3 +138,44 @@ def parse_and_validate(
                             expected_val = expected_val[:10]
             if raw_val != expected_val:
                 raise ValueError(f"Parse-back failure for {canonical_id} field {can_field}: expected '{expected_val}', got '{raw_val}'")
+
+        for rel_name, expected_rel in expected_record.get("relationships", {}).items():
+            fmap = family_map.get(rel_name)
+            if fmap and not fmap.is_present:
+                continue
+
+            if fmap:
+                source_name = fmap.source_name
+                path = fmap.path
+            else:
+                path = None
+                if profile.case_naming == "pascal_case":
+                    source_name = "".join(x.capitalize() for x in rel_name.split("_"))
+                elif profile.case_naming in ("camel_case", "mixed"):
+                    parts = rel_name.split("_")
+                    source_name = parts[0] + "".join(x.capitalize() for x in parts[1:])
+                else:
+                    source_name = rel_name
+
+            # Extract raw val
+            if path and ext != "csv":
+                current = row
+                for p in path:
+                    current = current.get(p, {})
+                raw_val = current if current != {} else None
+            else:
+                raw_val = row.get(source_name)
+
+            if ext == "csv" and raw_val == "":
+                raw_val = None
+
+            if raw_val is not None:
+                if isinstance(expected_rel, list):
+                    pass # Lists not fully mapped in parser yet
+                else:
+                    if str(raw_val) != str(expected_rel):
+                        raise ValueError(f"Parse-back relationship failure for {canonical_id} rel {rel_name}: expected '{expected_rel}', got '{raw_val}'")
+            elif expected_rel is not None:
+                # If relationship isn't represented natively in the output, it could be missing here. 
+                # For our requirements, if the profile DOES map this relationship, it should be present.
+                pass

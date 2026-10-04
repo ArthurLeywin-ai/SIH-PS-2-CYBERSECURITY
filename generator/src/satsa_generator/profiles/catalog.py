@@ -53,6 +53,7 @@ def get_src_b() -> ProfileDefinition:
     return ProfileDefinition(
         profile_id="SRC-B",
         format="CSV",
+        case_naming="pascal_case",
         timestamp_format="local_iana",
         timezone="America/New_York",
         family_mappings={
@@ -90,6 +91,7 @@ def get_src_c() -> ProfileDefinition:
     return ProfileDefinition(
         profile_id="SRC-C",
         format="JSON",
+        case_naming="camel_case",
         timestamp_format="iso_offset_ms",
         relationships_nested=True,
         family_mappings={
@@ -126,6 +128,7 @@ def get_src_d() -> ProfileDefinition:
     return ProfileDefinition(
         profile_id="SRC-D",
         format="JSONL",
+        case_naming="mixed",
         timestamp_format="date_only",
         family_mappings={
             "organization": {

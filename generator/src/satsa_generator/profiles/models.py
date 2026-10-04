@@ -46,6 +46,7 @@ class ProfileDefinition(BaseModel):
     profile_id: Literal["SRC-A", "SRC-B", "SRC-C", "SRC-D", "SRC-E"]
     version: str = "1.0"
     format: Literal["CSV", "JSON", "JSONL"]
+    case_naming: Literal["snake_case", "pascal_case", "camel_case", "mixed"] = "snake_case"
     timestamp_format: Literal["iso_z", "iso_offset_ms", "local_iana", "date_only"]
     timezone: str = "UTC" # For local_iana
 

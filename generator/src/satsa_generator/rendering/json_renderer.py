@@ -7,9 +7,8 @@ import json
 from uuid import UUID
 
 from satsa_generator.fixture.models import FixtureRecord
-from satsa_generator.provenance.models import FieldProvenance, SourceRecordIndex
+from satsa_generator.provenance.models import FieldProvenance, RelationshipProvenance, SourceRecordIndex
 from satsa_generator.rendering.interfaces import BaseRenderer, RenderContext
-
 
 class JSONRenderer(BaseRenderer):
     """Renders canonical records to JSON following profile rules."""
@@ -29,20 +28,21 @@ class JSONRenderer(BaseRenderer):
 
         for idx, record in enumerate(records):
             record_dict = record.model_dump(mode="json")
+            record_obj_dict = record.model_dump()
             source_obj = {}
 
             canonical_id = None
             org_id = None
             sub_id = None
 
-            for key, val in record_dict.items():
-                if key.endswith("_id") and isinstance(val, str) and "-" in val:
+            for key, val in record_obj_dict.items():
+                if key.endswith("_id") and isinstance(val, UUID):
                     if canonical_id is None:
-                        canonical_id = UUID(val)
-                if key == "organization_id":
-                    org_id = UUID(val) if val else None
-                if key == "submission_id":
-                    sub_id = UUID(val) if val else None
+                        canonical_id = val
+                if key == "organization_id" and isinstance(val, UUID):
+                    org_id = val
+                if key == "submission_id" and isinstance(val, UUID):
+                    sub_id = val
 
             if not canonical_id:
                 canonical_id = UUID(int=idx)
@@ -74,6 +74,18 @@ class JSONRenderer(BaseRenderer):
                             canonical_field_name=canonical_field,
                         )
                     )
+                    
+                    if canonical_field.endswith("_id") and canonical_field != f"{family}_id" and isinstance(record_obj_dict.get(canonical_field), UUID):
+                        context.relationship_provenance.append(
+                            RelationshipProvenance(
+                                source_file_path=context.output_path,
+                                source_record_locator=f"[{idx}]{locator_suffix}",
+                                source_relationship_field=path[-1] if path else source_name,
+                                relationship_type=canonical_field,
+                                canonical_subject_id=canonical_id,
+                                canonical_object_id=record_obj_dict[canonical_field],
+                            )
+                        )
 
             rendered_list.append(source_obj)
 

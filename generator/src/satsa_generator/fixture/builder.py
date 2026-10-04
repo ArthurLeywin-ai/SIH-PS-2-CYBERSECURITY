@@ -394,22 +394,81 @@ def _build_m3_fixture_internal(
         config, root, seeds.private_ledger_hash(), contract="SATSA-M3-FIXTURE-V1"
     )
 
+    from uuid import UUID
     from satsa_generator.profiles.catalog import get_profile
+    from satsa_generator.canonical.oracle import CanonicalOracle, CanonicalRecordState
     from satsa_generator.rendering.engine import RenderingEngine
+    
+    oracle = CanonicalOracle()
+    # Populate the oracle
+    for family_name, rec_list in [
+        ("organization", organizations),
+        ("submission", submissions),
+        ("submission_manifest", submission_manifests),
+        ("submission_family", submission_families),
+        ("control_process_reference", control_refs),
+        ("control_process_subject_link", control_links),
+        ("asset", assets),
+        ("monitoring_coverage", coverages),
+        ("alert", alerts),
+        ("case", cases),
+        ("case_alert_link", case_alert_links),
+        ("investigation", investigations),
+        ("escalation", escalations),
+        ("action", actions),
+        ("resolution", resolutions),
+        ("closure", closures),
+        ("exception", exceptions),
+        ("process_change", process_changes)
+    ]:
+        for idx, record in enumerate(rec_list):
+            record_dict = record.model_dump(mode="json")
+            record_obj_dict = record.model_dump()
+            
+            canonical_id = None
+            if f"{family_name}_id" in record_obj_dict:
+                canonical_id = record_obj_dict[f"{family_name}_id"]
+            else:
+                for key, val in record_obj_dict.items():
+                    if key.endswith("_id") and isinstance(val, UUID):
+                        if canonical_id is None:
+                            canonical_id = val
 
-    # We will simulate heterogeneous sources by assigning different records to different profiles
-    # For now, let's use SRC-A for most, SRC-C for cases, etc. to demonstrate heterogeneity
+            if not canonical_id:
+                canonical_id = UUID(int=idx)
+
+            # Build relationships natively
+            rels = {}
+            for k, v in record_obj_dict.items():
+                if k.endswith("_id") and k != f"{family_name}_id" and isinstance(v, UUID):
+                    rels[k] = v
+
+            # For case -> alerts many-to-many
+            if family_name == "case":
+                alerts_for_case = [link.alert_id for link in case_alert_links if link.case_id == canonical_id]
+                if alerts_for_case:
+                    rels["alerts"] = alerts_for_case
+
+            oracle.register_expected_record(
+                CanonicalRecordState(
+                    canonical_record_id=canonical_id,
+                    canonical_family=family_name,
+                    fields=record_dict,
+                    relationships=rels
+                )
+            )
+
     profile_a = get_profile("SRC-A")
     profile_b = get_profile("SRC-B")
     profile_c = get_profile("SRC-C")
     profile_d = get_profile("SRC-D")
     profile_e = get_profile("SRC-E")
 
-    engine_a = RenderingEngine(source_exports_root, profile_a)
-    engine_b = RenderingEngine(source_exports_root, profile_b)
-    engine_c = RenderingEngine(source_exports_root, profile_c)
-    engine_d = RenderingEngine(source_exports_root, profile_d)
-    engine_e = RenderingEngine(source_exports_root, profile_e)
+    engine_a = RenderingEngine(source_exports_root, profile_a, oracle)
+    engine_b = RenderingEngine(source_exports_root, profile_b, oracle)
+    engine_c = RenderingEngine(source_exports_root, profile_c, oracle)
+    engine_d = RenderingEngine(source_exports_root, profile_d, oracle)
+    engine_e = RenderingEngine(source_exports_root, profile_e, oracle)
 
     file_manifests = []
 

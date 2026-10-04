@@ -34,10 +34,10 @@ class RenderResult:
 class RenderingEngine:
     """Coordinates rendering of canonical records into source files."""
 
-    def __init__(self, output_root: Path, profile: ProfileDefinition):
+    def __init__(self, output_root: Path, profile: ProfileDefinition, oracle: CanonicalOracle):
         self.output_root = output_root
         self.profile = profile
-        self.oracle = CanonicalOracle()
+        self.oracle = oracle
         self.indexes: list[SourceRecordIndex] = []
         self.field_provenance: list[FieldProvenance] = []
         self.relationship_provenance: list[RelationshipProvenance] = []
@@ -73,26 +73,6 @@ class RenderingEngine:
         self.indexes.extend(context.indexes)
         self.field_provenance.extend(context.field_provenance)
         self.relationship_provenance.extend(context.relationship_provenance)
-
-        # Register Expected Canonical State
-        for idx, record in enumerate(records):
-            record_dict = record.model_dump(mode="json")
-            canonical_id = None
-            for key, val in record_dict.items():
-                if key.endswith("_id") and isinstance(val, str) and "-" in val:
-                    if canonical_id is None:
-                        canonical_id = UUID(val)
-            if not canonical_id:
-                canonical_id = UUID(int=idx)
-
-            self.oracle.register_expected_record(
-                CanonicalRecordState(
-                    canonical_record_id=canonical_id,
-                    canonical_family=family,
-                    fields=record_dict,
-                    relationships={}  # Expand if explicit relationships are mapped
-                )
-            )
 
         filepath.parent.mkdir(parents=True, exist_ok=True)
         filepath.write_bytes(content)
