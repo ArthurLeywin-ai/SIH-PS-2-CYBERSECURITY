@@ -186,8 +186,17 @@ class Gate09CanonicalProvenance(ValidationGate):
 
                     # Verify source file exists
                     if not src_file.exists():
-                        is_auth_missing_fam = "MISSING_FAMILY" in authorized_types
-                        if not is_auth_missing_fam:
+                        is_auth_missing_file = False
+                        if context.ledger:
+                            for entry in context.ledger.entries.values():
+                                t_fam = getattr(entry, "target_family", "")
+                                m_tp = str(getattr(entry, "mutation_type", ""))
+                                if "." in m_tp:
+                                    m_tp = m_tp.split(".")[-1]
+                                if t_fam and t_fam in src_file.name and m_tp == "MISSING_FAMILY":
+                                    is_auth_missing_file = True
+                                    break
+                        if not is_auth_missing_file:
                             issues.append(
                                 ValidationIssue(
                                     code="PROV_SOURCE_FILE_NOT_FOUND",
@@ -233,7 +242,17 @@ class Gate09CanonicalProvenance(ValidationGate):
 
                     # If file doesn't exist, check authorized missing family
                     if not src_path.exists():
-                        if "MISSING_FAMILY" not in authorized_types:
+                        is_auth_missing_file = False
+                        if context.ledger:
+                            for entry in context.ledger.entries.values():
+                                t_fam = getattr(entry, "target_family", "")
+                                m_tp = str(getattr(entry, "mutation_type", ""))
+                                if "." in m_tp:
+                                    m_tp = m_tp.split(".")[-1]
+                                if t_fam and t_fam in src_file_name and m_tp == "MISSING_FAMILY":
+                                    is_auth_missing_file = True
+                                    break
+                        if not is_auth_missing_file:
                             issues.append(
                                 ValidationIssue(
                                     code="PROV_SOURCE_FILE_MISSING",
@@ -257,16 +276,29 @@ class Gate09CanonicalProvenance(ValidationGate):
                     row_idx: int | None = None
                     if locator.startswith("row:"):
                         with contextlib.suppress(ValueError):
-                            row_idx = int(locator.split(":")[1]) - 1
-                    elif locator.startswith("[") and locator.endswith("]"):
+                            clean_loc = locator.split(".")[0]
+                            row_idx = int(clean_loc.split(":")[1]) - 1
+                    elif locator.startswith("["):
                         with contextlib.suppress(ValueError):
-                            row_idx = int(locator[1:-1])
+                            close_bracket = locator.find("]")
+                            if close_bracket != -1:
+                                row_idx = int(locator[1:close_bracket])
 
                     if row_idx is None or row_idx >= len(records):
-                        # Could be authorized partial submission or duplicate
-                        is_auth_locator = can_id_str in authorized_targets or any(
-                            t in authorized_types for t in ("PARTIAL_SUBMISSION", "MISSING_FAMILY")
-                        )
+                        # Could be authorized partial submission or missing family
+                        is_auth_locator = False
+                        if context.ledger:
+                            for entry in context.ledger.entries.values():
+                                t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                                t_fam = getattr(entry, "target_family", "")
+                                m_tp = str(getattr(entry, "mutation_type", ""))
+                                if "." in m_tp:
+                                    m_tp = m_tp.split(".")[-1]
+                                if m_tp in ("PARTIAL_SUBMISSION", "MISSING_FAMILY") and (
+                                    can_id_str in t_ids or (t_fam and t_fam in src_file_name)
+                                ):
+                                    is_auth_locator = True
+                                    break
                         if not is_auth_locator:
                             issues.append(
                                 ValidationIssue(
@@ -286,25 +318,98 @@ class Gate09CanonicalProvenance(ValidationGate):
                         continue
 
                     record_row = records[row_idx]
-                    actual_raw = record_row.get(src_field)
+
+                    # Check source field exists in source row (top-level or nested)
+                    has_field = False
+                    actual_raw = None
+                    if src_field in record_row:
+                        has_field = True
+                        actual_raw = record_row[src_field]
+                    elif "." in locator:
+                        parts = locator.split(".")[1:]
+                        curr = record_row
+                        found = True
+                        for part in parts:
+                            if isinstance(curr, dict) and part in curr:
+                                curr = curr[part]
+                            else:
+                                found = False
+                                break
+                        if found:
+                            has_field = True
+                            actual_raw = curr
+
+                    if not has_field:
+                        is_auth_missing_field = False
+                        if context.ledger:
+                            for entry in context.ledger.entries.values():
+                                t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                                t_fld = getattr(entry, "target_field", None)
+                                m_tp = str(getattr(entry, "mutation_type", ""))
+                                if "." in m_tp:
+                                    m_tp = m_tp.split(".")[-1]
+                                if (
+                                    can_id_str in t_ids
+                                    and m_tp == "MISSING_FIELD"
+                                    and (
+                                        t_fld in (src_field, fp.get("canonical_field_name"))
+                                        or t_fld is None
+                                    )
+                                ):
+                                    is_auth_missing_field = True
+                                    break
+                        if not is_auth_missing_field:
+                            issues.append(
+                                ValidationIssue(
+                                    code="PROV_SOURCE_FIELD_MISSING",
+                                    severity=GateSeverity.BLOCKING,
+                                    gate_index=9,
+                                    gate_name=self.gate_name,
+                                    scope="field_provenance",
+                                    target=f"{src_file_name}:{locator}:{src_field}",
+                                    message=(
+                                        f"Source field '{src_field}' not found in source "
+                                        f"record at '{locator}'"
+                                    ),
+                                    expected=f"Field '{src_field}' in record",
+                                    actual="Missing",
+                                )
+                            )
+                        continue
 
                     # Compare raw lexical value from disk
                     if actual_raw != expected_raw:
-                        # Check authorized mutations for this target or type
-                        is_auth_change = can_id_str in authorized_targets or any(
-                            t in authorized_types
-                            for t in (
-                                "MISSING_FIELD",
-                                "MALFORMED_VALUE",
-                                "SCHEMA_DRIFT",
-                                "VOCABULARY_DRIFT",
-                                "TIMESTAMP_PROBLEM",
-                                "SOURCE_ID_ABSENCE",
-                                "EXACT_DUPLICATE",
-                                "CONFLICTING_DUPLICATE",
-                                "COUNT_MISMATCH",
-                            )
-                        )
+                        # Must be an exact authorized mutation for this record ID and field
+                        is_auth_change = False
+                        if context.ledger:
+                            for entry in context.ledger.entries.values():
+                                t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                                t_fld = getattr(entry, "target_field", None)
+                                m_tp = str(getattr(entry, "mutation_type", ""))
+                                if "." in m_tp:
+                                    m_tp = m_tp.split(".")[-1]
+
+                                if can_id_str in t_ids:
+                                    can_fld = fp.get("canonical_field_name")
+                                    if t_fld in (src_field, can_fld) or t_fld is None:
+                                        is_auth_change = True
+                                        break
+                                    if m_tp in (
+                                        "SCHEMA_DRIFT",
+                                        "TIMESTAMP_PROBLEM",
+                                        "BROKEN_RELATIONSHIP",
+                                        "MALFORMED_VALUE",
+                                        "MISSING_FIELD",
+                                        "VOCABULARY_DRIFT",
+                                        "LATE_ARRIVAL",
+                                        "COUNT_MISMATCH",
+                                        "SOURCE_ID_ABSENCE",
+                                        "EXACT_DUPLICATE",
+                                        "CONFLICTING_DUPLICATE",
+                                    ) and t_fld in (src_field, can_fld):
+                                        is_auth_change = True
+                                        break
+
                         if not is_auth_change:
                             issues.append(
                                 ValidationIssue(
@@ -331,10 +436,6 @@ class Gate09CanonicalProvenance(ValidationGate):
                     if not src_path.exists():
                         continue
 
-                    # If authorized broken relationship, skip failure
-                    is_auth_rel = sub_id in authorized_targets or (
-                        "BROKEN_RELATIONSHIP" in authorized_types
-                    )
                     records = _get_source_records(src_path)
                     if records is None:
                         continue
@@ -343,12 +444,43 @@ class Gate09CanonicalProvenance(ValidationGate):
                     r_idx: int | None = None
                     if loc.startswith("row:"):
                         with contextlib.suppress(ValueError):
-                            r_idx = int(loc.split(":")[1]) - 1
-                    elif loc.startswith("[") and loc.endswith("]"):
+                            clean_loc = loc.split(".")[0]
+                            r_idx = int(clean_loc.split(":")[1]) - 1
+                    elif loc.startswith("["):
                         with contextlib.suppress(ValueError):
-                            r_idx = int(loc[1:-1])
+                            close_bracket = loc.find("]")
+                            if close_bracket != -1:
+                                r_idx = int(loc[1:close_bracket])
 
-                    if (r_idx is None or r_idx >= len(records)) and not is_auth_rel:
+                    is_auth_rel = False
+                    if context.ledger:
+                        for entry in context.ledger.entries.values():
+                            t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                            m_tp = str(getattr(entry, "mutation_type", ""))
+                            if "." in m_tp:
+                                m_tp = m_tp.split(".")[-1]
+                            if sub_id in t_ids and m_tp in (
+                                "BROKEN_RELATIONSHIP",
+                                "REMOVE_RELATIONSHIP",
+                            ):
+                                is_auth_rel = True
+                                break
+
+                    is_auth_rel_loc = is_auth_rel
+                    if not is_auth_rel_loc and context.ledger:
+                        for entry in context.ledger.entries.values():
+                            t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                            t_fam = getattr(entry, "target_family", "")
+                            m_tp = str(getattr(entry, "mutation_type", ""))
+                            if "." in m_tp:
+                                m_tp = m_tp.split(".")[-1]
+                            if m_tp in ("PARTIAL_SUBMISSION", "MISSING_FAMILY") and (
+                                sub_id in t_ids or (t_fam and t_fam in src_file_name)
+                            ):
+                                is_auth_rel_loc = True
+                                break
+
+                    if (r_idx is None or r_idx >= len(records)) and not is_auth_rel_loc:
                         issues.append(
                             ValidationIssue(
                                 code="PROV_REL_LOCATOR_NOT_FOUND",
@@ -362,6 +494,33 @@ class Gate09CanonicalProvenance(ValidationGate):
                                 actual=str(r_idx),
                             )
                         )
+                        continue
+
+                    if r_idx is not None and r_idx < len(records):
+                        rec_row = records[r_idx]
+                        rel_field = rp.get("source_relationship_field")
+                        if rel_field and rel_field in rec_row:
+                            actual_val = rec_row[rel_field]
+                            if (
+                                actual_val in ("00000000-0000-0000-0000-000000000000", "", None)
+                                and not is_auth_rel
+                            ):
+                                issues.append(
+                                    ValidationIssue(
+                                        code="PROV_RELATIONSHIP_MISMATCH",
+                                        severity=GateSeverity.BLOCKING,
+                                        gate_index=9,
+                                        gate_name=self.gate_name,
+                                        scope="relationship_provenance",
+                                        target=f"{src_file_name}:{loc}:{rel_field}",
+                                        message=(
+                                            f"Broken relationship value '{actual_val}' for field "
+                                            f"'{rel_field}' without authorization"
+                                        ),
+                                        expected="Valid target foreign key",
+                                        actual=str(actual_val),
+                                    )
+                                )
 
             except Exception as exc:
                 issues.append(

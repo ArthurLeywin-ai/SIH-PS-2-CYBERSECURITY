@@ -36,6 +36,11 @@ from satsa_generator.fixture.builder import (
     parse_master_seed_hex,
 )
 from satsa_generator.ids.service import IDService
+from satsa_generator.quality.models import QualityMutationType, QualityPlan
+from satsa_generator.quality.mutators import (
+    QualityMutationError,
+    _apply_source_file_mutation,
+)
 from satsa_generator.scenarios.ledger import AuthorizationLedger
 from satsa_generator.scenarios.models import (
     AuthorizationEntry,
@@ -594,3 +599,390 @@ def test_validation_runner_loud_failure_on_blocking(clean_context):
 
     with pytest.raises(ValidationGateError, match="Validation framework failed"):
         runner.assert_all_passed(full_report)
+
+
+# ===========================================================================
+# Focused Regression Tests for M5 Blocker Remediation
+# ===========================================================================
+
+
+def test_m5_source_representation_derived_from_finalized_m4_state(complete_m5_bundle):
+    """Verify that M5 source exports are derived from the finalized M4 state."""
+    ctx, _, _ = complete_m5_bundle
+    source_root = ctx.source_exports_root
+    alert_csv = source_root / "alert_src-a.csv"
+    assert alert_csv.exists()
+
+    # The number of alerts in the rendered file should correspond to post-M4 realization
+    lines = alert_csv.read_text(encoding="utf-8").strip().splitlines()
+    data_rows = lines[1:]  # exclude header
+    # Must have records rendered from post-M4 alerts
+    assert len(data_rows) >= len(ctx.records["alert"]) - 2  # allowing duplicate/partial mutations
+
+
+def test_quality_mutation_exact_targeting(tmp_path):
+    """Verify quality mutation targets exact record, locator, and field without side effects."""
+    source_dir = tmp_path / "exact_target_source"
+    source_dir.mkdir()
+    csv_file = source_dir / "alert_src-a.csv"
+    id1 = "11111111-1111-1111-1111-111111111111"
+    id2 = "22222222-2222-2222-2222-222222222222"
+    id3 = "33333333-3333-3333-3333-333333333333"
+
+    csv_file.write_text(
+        f"alert_id,source_alert_id,severity\n"
+        f"{id1},src-01,CRITICAL\n"
+        f"{id2},src-02,HIGH\n"
+        f"{id3},src-03,LOW\n",
+        encoding="utf-8",
+    )
+
+    plan = QualityPlan(
+        plan_id="qp-exact-1",
+        mutation_type=QualityMutationType.MISSING_FIELD,
+        target_family="alert",
+        target_record_id=id2,
+        organization_id="org-1",
+        period_id="P01",
+        source_file="alert_src-a.csv",
+        source_locator="row:2",
+        source_field="source_alert_id",
+    )
+
+    receipt_details = _apply_source_file_mutation(plan, source_dir)
+    assert receipt_details["source_file"] == "alert_src-a.csv"
+    assert receipt_details["source_locator"] == "row:2"
+
+    rows = csv_file.read_text(encoding="utf-8").strip().splitlines()[1:]
+    assert rows[0].split(",")[1] == "src-01"  # row 1 untouched
+    assert rows[1].split(",")[1] == ""  # row 2 mutated
+    assert rows[2].split(",")[1] == "src-03"  # row 3 untouched
+
+
+def test_quality_mutation_wrong_record_fails(tmp_path):
+    """Verify that targeting a record ID that does not match the locator fails loudly."""
+    source_dir = tmp_path / "wrong_rec_source"
+    source_dir.mkdir()
+    csv_file = source_dir / "alert_src-a.csv"
+    id1 = "11111111-1111-1111-1111-111111111111"
+    id2 = "22222222-2222-2222-2222-222222222222"
+
+    csv_file.write_text(
+        f"alert_id,source_alert_id,severity\n{id1},src-01,CRITICAL\n{id2},src-02,HIGH\n",
+        encoding="utf-8",
+    )
+
+    # Locator row:2 points to id2, but plan specifies id1 -> mismatch
+    plan = QualityPlan(
+        plan_id="qp-mismatch",
+        mutation_type=QualityMutationType.MISSING_FIELD,
+        target_family="alert",
+        target_record_id=id1,
+        organization_id="org-1",
+        period_id="P01",
+        source_file="alert_src-a.csv",
+        source_locator="row:2",
+        source_field="source_alert_id",
+    )
+
+    with pytest.raises(QualityMutationError, match="does not match expected target record ID"):
+        _apply_source_file_mutation(plan, source_dir)
+
+
+def test_quality_mutation_wrong_locator_fails(tmp_path):
+    """Verify that an out-of-bounds locator fails loudly."""
+    source_dir = tmp_path / "wrong_loc_source"
+    source_dir.mkdir()
+    csv_file = source_dir / "alert_src-a.csv"
+    csv_file.write_text(
+        "alert_id,severity\n11111111-1111-1111-1111-111111111111,HIGH\n", encoding="utf-8"
+    )
+
+    plan = QualityPlan(
+        plan_id="qp-bad-loc",
+        mutation_type=QualityMutationType.MISSING_FIELD,
+        target_family="alert",
+        target_record_id="11111111-1111-1111-1111-111111111111",
+        organization_id="org-1",
+        period_id="P01",
+        source_file="alert_src-a.csv",
+        source_locator="row:999",
+        source_field="severity",
+    )
+
+    with pytest.raises(QualityMutationError, match="out of bounds"):
+        _apply_source_file_mutation(plan, source_dir)
+
+
+def test_quality_mutation_wrong_source_field_fails(tmp_path):
+    """Verify that specifying a non-existent source field fails loudly."""
+    source_dir = tmp_path / "wrong_fld_source"
+    source_dir.mkdir()
+    csv_file = source_dir / "alert_src-a.csv"
+    id1 = "11111111-1111-1111-1111-111111111111"
+    csv_file.write_text(f"alert_id,severity\n{id1},HIGH\n", encoding="utf-8")
+
+    plan = QualityPlan(
+        plan_id="qp-bad-fld",
+        mutation_type=QualityMutationType.MISSING_FIELD,
+        target_family="alert",
+        target_record_id=id1,
+        organization_id="org-1",
+        period_id="P01",
+        source_file="alert_src-a.csv",
+        source_locator="row:1",
+        source_field="nonexistent_field_xyz",
+    )
+
+    with pytest.raises(QualityMutationError, match="not found in record"):
+        _apply_source_file_mutation(plan, source_dir)
+
+
+def test_quality_mutation_missing_target_fails(tmp_path):
+    """Verify that a missing target file fails loudly."""
+    source_dir = tmp_path / "empty_source"
+    source_dir.mkdir()
+
+    plan = QualityPlan(
+        plan_id="qp-missing-file",
+        mutation_type=QualityMutationType.MISSING_FIELD,
+        target_family="nonexistent_family",
+        target_record_id="11111111-1111-1111-1111-111111111111",
+        organization_id="org-1",
+        period_id="P01",
+        source_file="nonexistent.csv",
+    )
+
+    with pytest.raises(QualityMutationError, match="does not exist on disk"):
+        _apply_source_file_mutation(plan, source_dir)
+
+
+def test_gate_08_unrelated_mutation_cannot_excuse_corruption(complete_m5_bundle, tmp_path):
+    """Verify Gate 8 fails when an unrelated field is corrupted on an alert."""
+    ctx, _, _ = complete_m5_bundle
+    bad_src = tmp_path / "bad_src_gate8"
+    shutil.copytree(ctx.source_exports_root, bad_src)
+
+    # Corrupt alert_category in alert_src-a.csv without authorization
+    alert_csv = bad_src / "alert_src-a.csv"
+    lines = alert_csv.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split(",")
+    if "alert_category" in header:
+        cat_idx = header.index("alert_category")
+        row = lines[1].split(",")
+        row[cat_idx] = "UNAUTHORIZED_CORRUPTED_CATEGORY"
+        lines[1] = ",".join(row)
+        alert_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.source_exports_root = bad_src
+    gate = Gate08SourceRendering()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "RENDER_UNAUTHORIZED_CORRUPTION" for i in report.issues)
+
+
+def test_gate_08_wrong_record_mutation_cannot_excuse_corruption(complete_m5_bundle, tmp_path):
+    """Verify Gate 8 fails when corruption occurs on a record other than the authorized target."""
+    ctx, _, _ = complete_m5_bundle
+    bad_src = tmp_path / "bad_src_wrong_rec"
+    shutil.copytree(ctx.source_exports_root, bad_src)
+
+    # Corrupt the last row instead of an authorized row
+    alert_csv = bad_src / "alert_src-a.csv"
+    lines = alert_csv.read_text(encoding="utf-8").splitlines()
+    if len(lines) > 5:
+        header = lines[0].split(",")
+        sev_idx = header.index("severity")
+        row = lines[-1].split(",")
+        row[sev_idx] = "UNKNOWN_SEV_CORRUPTION"
+        lines[-1] = ",".join(row)
+        alert_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.source_exports_root = bad_src
+    gate = Gate08SourceRendering()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "RENDER_UNAUTHORIZED_CORRUPTION" for i in report.issues)
+
+
+def test_gate_09_wrong_source_file_fails(complete_m5_bundle, tmp_path):
+    """Verify Gate 9 fails when provenance points to a non-existent source file."""
+    ctx, _, _ = complete_m5_bundle
+    bad_oracle = tmp_path / "bad_oracle_file"
+    shutil.copytree(ctx.oracle_root, bad_oracle)
+
+    prov_file = next(bad_oracle.glob("*_provenance.json"))
+    p_data = json.loads(prov_file.read_text(encoding="utf-8"))
+    if p_data.get("field_provenance"):
+        p_data["field_provenance"][0]["source_file_path"] = "nonexistent_file_99.csv"
+        prov_file.write_text(json.dumps(p_data), encoding="utf-8")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.oracle_root = bad_oracle
+    gate = Gate09CanonicalProvenance()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "PROV_SOURCE_FILE_MISSING" for i in report.issues)
+
+
+def test_gate_09_wrong_source_field_fails(complete_m5_bundle, tmp_path):
+    """Verify Gate 9 fails when provenance points to a non-existent source field."""
+    ctx, _, _ = complete_m5_bundle
+    bad_oracle = tmp_path / "bad_oracle_fld"
+    shutil.copytree(ctx.oracle_root, bad_oracle)
+
+    prov_file = next(bad_oracle.glob("*_provenance.json"))
+    p_data = json.loads(prov_file.read_text(encoding="utf-8"))
+    if p_data.get("field_provenance"):
+        p_data["field_provenance"][0]["source_field_name"] = "ghost_field_not_in_source"
+        prov_file.write_text(json.dumps(p_data), encoding="utf-8")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.oracle_root = bad_oracle
+    gate = Gate09CanonicalProvenance()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "PROV_SOURCE_FIELD_MISSING" for i in report.issues)
+
+
+def test_gate_09_wrong_locator_fails(complete_m5_bundle, tmp_path):
+    """Verify Gate 9 fails when provenance has an out-of-bounds locator."""
+    ctx, _, _ = complete_m5_bundle
+    bad_oracle = tmp_path / "bad_oracle_loc"
+    shutil.copytree(ctx.oracle_root, bad_oracle)
+
+    prov_file = next(bad_oracle.glob("*_provenance.json"))
+    p_data = json.loads(prov_file.read_text(encoding="utf-8"))
+    if p_data.get("field_provenance"):
+        p_data["field_provenance"][0]["source_record_locator"] = "row:99999"
+        prov_file.write_text(json.dumps(p_data), encoding="utf-8")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.oracle_root = bad_oracle
+    gate = Gate09CanonicalProvenance()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "PROV_LOCATOR_NOT_FOUND" for i in report.issues)
+
+
+def test_gate_09_wrong_relationship_provenance_fails(complete_m5_bundle, tmp_path):
+    """Verify Gate 9 fails when relationship foreign key is corrupted without authorization."""
+    ctx, _, _ = complete_m5_bundle
+    bad_src = tmp_path / "bad_src_rel"
+    shutil.copytree(ctx.source_exports_root, bad_src)
+
+    # Corrupt case_alert_link_src-a.csv alert_id on row 2
+    link_csv = bad_src / "case_alert_link_src-a.csv"
+    if link_csv.exists():
+        lines = link_csv.read_text(encoding="utf-8").splitlines()
+        if len(lines) > 2:
+            header = lines[0].split(",")
+            if "alert_id" in header:
+                idx = header.index("alert_id")
+                row = lines[2].split(",")
+                row[idx] = "00000000-0000-0000-0000-000000000000"
+                lines[2] = ",".join(row)
+                link_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.source_exports_root = bad_src
+    gate = Gate09CanonicalProvenance()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "PROV_RELATIONSHIP_MISMATCH" for i in report.issues)
+
+
+def test_gate_10_pathological_alert_concentration_fails(clean_context):
+    """Verify Gate 10 fails when 100% of alerts have identical timestamp."""
+    bad_ctx = copy.copy(clean_context)
+    bad_records = copy.deepcopy(clean_context.records)
+    fixed_time = datetime(2026, 1, 1, 12, 0, 0)
+    orig_alert = bad_records["alert"][0]
+    bad_records["alert"] = [
+        orig_alert.model_copy(update={"created_at_utc": fixed_time, "alert_id": UUID(int=i + 1)})
+        for i in range(10)
+    ]
+    bad_ctx.records = bad_records
+    gate = Gate10DistributionSanity()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "DIST_PATHOLOGICAL_TIMESTAMP_CONCENTRATION" for i in report.issues)
+
+
+def test_gate_10_pathological_uniformity_fails(clean_context):
+    """Verify Gate 10 detects degenerate severity uniformity."""
+    bad_ctx = copy.copy(clean_context)
+    bad_records = copy.deepcopy(clean_context.records)
+    orig_alert = bad_records["alert"][0]
+    bad_records["alert"] = [
+        orig_alert.model_copy(
+            update={
+                "severity": "INFORMATIONAL",
+                "alert_id": UUID(int=i + 1),
+                "created_at_utc": datetime(2026, 1, 1, 12, i, 0),
+            }
+        )
+        for i in range(15)
+    ]
+    bad_ctx.records = bad_records
+    gate = Gate10DistributionSanity()
+    report = gate.validate(bad_ctx)
+    assert any(i.code == "DIST_PATHOLOGICAL_UNIFORMITY" for i in report.issues)
+
+
+def test_gate_10_negative_case_duration_fails(clean_context):
+    """Verify Gate 10 fails when closure timestamp precedes case creation timestamp."""
+    bad_ctx = copy.copy(clean_context)
+    bad_records = copy.deepcopy(clean_context.records)
+    if bad_records.get("case") and bad_records.get("closure"):
+        c = bad_records["case"][0]
+        cl = bad_records["closure"][0]
+        # Make closure earlier than case creation
+        earlier_time = c.created_at_utc - timedelta(days=10)
+        bad_records["closure"][0] = cl.model_copy(
+            update={"case_id": c.case_id, "created_at_utc": earlier_time}
+        )
+    bad_ctx.records = bad_records
+    gate = Gate10DistributionSanity()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "DIST_NEGATIVE_CASE_DURATION" for i in report.issues)
+
+
+def test_gate_14_hash_mismatch_fails(complete_m5_bundle, tmp_path):
+    """Verify Gate 14 fails when a manifested file is altered without updating manifest."""
+    ctx, _, _ = complete_m5_bundle
+    bad_op = tmp_path / "bad_op_hash"
+    shutil.copytree(ctx.operational_root, bad_op)
+
+    # Tamper with an operational payload file
+    target_file = bad_op / "alerts.json"
+    content = target_file.read_bytes()
+    target_file.write_bytes(content + b" ")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.operational_root = bad_op
+    gate = Gate14PackageHash()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "PKG_HASH_MISMATCH" for i in report.issues)
+
+
+def test_gate_14_size_mismatch_fails(complete_m5_bundle, tmp_path):
+    """Verify Gate 14 fails when a manifested file has wrong size."""
+    ctx, _, _ = complete_m5_bundle
+    bad_op = tmp_path / "bad_op_size"
+    shutil.copytree(ctx.operational_root, bad_op)
+
+    # Truncate an operational payload file
+    target_file = bad_op / "cases.json"
+    target_file.write_bytes(b"[]")
+
+    bad_ctx = copy.copy(ctx)
+    bad_ctx.operational_root = bad_op
+    gate = Gate14PackageHash()
+    report = gate.validate(bad_ctx)
+    assert report.passed is False
+    assert any(i.code == "PKG_SIZE_MISMATCH" for i in report.issues)

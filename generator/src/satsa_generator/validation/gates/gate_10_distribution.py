@@ -227,6 +227,7 @@ class Gate10DistributionSanity(ValidationGate):
 
         # 7. Action, resolution, and closure behavior
         closures = records.get("closure", [])
+        closed_case_ids: set[str] = set()
         if cases and closures:
             closed_case_ids = {
                 str(getattr(cl, "case_id", "")) for cl in closures if getattr(cl, "case_id", None)
@@ -246,6 +247,49 @@ class Gate10DistributionSanity(ValidationGate):
                     )
                 )
 
+            # Case duration distribution: closure timestamp must not precede case creation
+            case_created_map = {
+                str(getattr(c, "case_id", "")): getattr(c, "created_at_utc", None) for c in cases
+            }
+            for cl in closures:
+                c_id = str(getattr(cl, "case_id", ""))
+                c_created = case_created_map.get(c_id)
+                cl_time = getattr(cl, "created_at_utc", None)
+                if c_created and cl_time and cl_time < c_created:
+                    issues.append(
+                        ValidationIssue(
+                            code="DIST_NEGATIVE_CASE_DURATION",
+                            severity=GateSeverity.BLOCKING,
+                            gate_index=10,
+                            gate_name=self.gate_name,
+                            scope="closure",
+                            target=c_id,
+                            message=(
+                                f"Closure timestamp {cl_time} is earlier than case "
+                                f"creation {c_created}"
+                            ),
+                            expected="Closure time >= Case creation time",
+                            actual=f"{cl_time} < {c_created}",
+                        )
+                    )
+
+        # Backlog / open-case sanity check
+        open_cases = len(cases) - len(closed_case_ids)
+        if open_cases < 0:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_NEGATIVE_BACKLOG",
+                    severity=GateSeverity.BLOCKING,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="case",
+                    target="open_case_count",
+                    message=f"Negative case backlog detected: {open_cases}",
+                    expected="Open cases >= 0",
+                    actual=str(open_cases),
+                )
+            )
+
         # 8. Asset criticality and monitoring coverage mix
         coverages = records.get("monitoring_coverage", [])
         if assets and not coverages and len(assets) > 3:
@@ -264,7 +308,7 @@ class Gate10DistributionSanity(ValidationGate):
             )
 
         # 9. Degenerate distribution / Uniformity artifacts
-        if len(alerts) > 20:
+        if len(alerts) >= 5:
             created_times = [
                 str(getattr(a, "created_at_utc", ""))
                 for a in alerts
@@ -276,16 +320,44 @@ class Gate10DistributionSanity(ValidationGate):
                 issues.append(
                     ValidationIssue(
                         code="DIST_IDENTICAL_TIMESTAMPS_ARTIFACT",
-                        severity=GateSeverity.HIGH,
+                        severity=GateSeverity.BLOCKING,
                         gate_index=10,
                         gate_name=self.gate_name,
                         scope="alert",
                         target="created_at_utc",
-                        message="All alerts have identical timestamp down to the second",
+                        message="100% of alerts have identical timestamp down to the second",
                         expected="Temporal dispersion across alerts",
                         actual=f"{max_spike} alerts at {created_times[0]}",
                     )
                 )
+                issues.append(
+                    ValidationIssue(
+                        code="DIST_PATHOLOGICAL_TIMESTAMP_CONCENTRATION",
+                        severity=GateSeverity.BLOCKING,
+                        gate_index=10,
+                        gate_name=self.gate_name,
+                        scope="alert",
+                        target="created_at_utc",
+                        message="100% of alerts have identical timestamp down to the second",
+                        expected="Temporal dispersion across alerts",
+                        actual=f"{max_spike} alerts at {created_times[0]}",
+                    )
+                )
+
+        if len(alerts) > 10 and len(sev_counts) == 1:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_PATHOLOGICAL_UNIFORMITY",
+                    severity=GateSeverity.HIGH,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="alert",
+                    target="severity_mix",
+                    message="All alerts have identical severity (degenerate uniformity)",
+                    expected="Multiple alert severities",
+                    actual=str(list(sev_counts.keys())),
+                )
+            )
 
         # 10. Statistical leakage diagnostic: no single public feature perfectly separates labels
         if gt_records and len(gt_records) >= 6:

@@ -93,6 +93,10 @@ class QualityPlan:
     seed_label: str = ""
     validator_id: str = "VAL-QUALITY"
     correlation_group: str | None = None
+    source_file: str | None = None
+    source_locator: str | None = None
+    source_field: str | None = None
+    source_profile_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -165,7 +165,7 @@ class Gate08SourceRendering(ValidationGate):
         # 4. Perform parse-back validation if oracle_root exists
         if context.oracle_root and context.oracle_root.exists():
             self._validate_parse_back(
-                source_root, context.oracle_root, profile_ids, issues, authorized_mutations
+                source_root, context.oracle_root, profile_ids, issues, context.ledger
             )
 
         return self.create_report(
@@ -292,9 +292,9 @@ class Gate08SourceRendering(ValidationGate):
         oracle_root: Path,
         profile_ids: set[str],
         issues: list[ValidationIssue],
-        authorized_mutations: dict[Any, Any],
+        ledger: Any,
     ) -> None:
-        """Execute parse-back verification against oracle for each rendered profile."""
+        """Execute parse-back verification against oracle with exact mutation reconciliation."""
         from satsa_generator.validation.parser import parse_and_validate
 
         for prof_id in profile_ids:
@@ -313,34 +313,24 @@ class Gate08SourceRendering(ValidationGate):
 
             for fam in families:
                 try:
-                    parse_and_validate(source_root, oracle_root, prof_id, fam)
+                    parse_and_validate(
+                        source_root,
+                        oracle_root,
+                        prof_id,
+                        fam,
+                        ledger=ledger,
+                    )
                 except Exception as exc:
-                    # Check if this family or failure is accounted for by authorized mutation
-                    has_auth = any(
-                        m_type in authorized_mutations
-                        for m_type in (
-                            "MISSING_FIELD",
-                            "MISSING_FAMILY",
-                            "MALFORMED_VALUE",
-                            "EXACT_DUPLICATE",
-                            "CONFLICTING_DUPLICATE",
-                            "BROKEN_RELATIONSHIP",
-                            "TIMESTAMP_PROBLEM",
-                            "SCHEMA_DRIFT",
-                            "VOCABULARY_DRIFT",
+                    issues.append(
+                        ValidationIssue(
+                            code="RENDER_UNAUTHORIZED_CORRUPTION",
+                            severity=GateSeverity.BLOCKING,
+                            gate_index=8,
+                            gate_name=self.gate_name,
+                            scope=f"parse_back:{prof_id}:{fam}",
+                            target=f"{fam}_{prof_id.lower()}",
+                            message=f"Parse-back validation failed for {prof_id} {fam}: {exc}",
+                            expected="Reconstruction matching oracle or authorized corruption",
+                            actual=str(exc),
                         )
                     )
-                    if not has_auth:
-                        issues.append(
-                            ValidationIssue(
-                                code="RENDER_PARSEBACK_FAILURE",
-                                severity=GateSeverity.BLOCKING,
-                                gate_index=8,
-                                gate_name=self.gate_name,
-                                scope=f"parse_back:{prof_id}:{fam}",
-                                target=f"{fam}_{prof_id.lower()}",
-                                message=f"Parse-back validation failed for {prof_id} {fam}: {exc}",
-                                expected="Successful reconstruction matching oracle",
-                                actual=str(exc),
-                            )
-                        )

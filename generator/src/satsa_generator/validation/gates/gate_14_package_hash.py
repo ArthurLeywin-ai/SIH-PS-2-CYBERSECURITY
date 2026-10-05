@@ -184,7 +184,7 @@ class Gate14PackageHash(ValidationGate):
             if actual_sha != expected_sha:
                 issues.append(
                     ValidationIssue(
-                        code="PKG_SHA256_MISMATCH",
+                        code="PKG_HASH_MISMATCH",
                         severity=GateSeverity.BLOCKING,
                         gate_index=14,
                         gate_name=self.gate_name,

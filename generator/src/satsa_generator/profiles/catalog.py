@@ -71,6 +71,7 @@ def get_src_a() -> ProfileDefinition:
                 "submission_id": FieldMapping(source_name="submission_id"),
                 "evidence_family": FieldMapping(source_name="evidence_family"),
                 "presence_state": FieldMapping(source_name="presence_state"),
+                "declared_record_count": FieldMapping(source_name="declared_record_count"),
             },
             "control_process_reference": {
                 "control_process_ref_id": FieldMapping(source_name="control_process_ref_id"),
@@ -228,6 +229,7 @@ def get_src_b() -> ProfileDefinition:
                 "submission_id": FieldMapping(source_name="SubmissionId"),
                 "evidence_family": FieldMapping(source_name="EvidenceFamily"),
                 "presence_state": FieldMapping(source_name="PresenceState"),
+                "declared_record_count": FieldMapping(source_name="DeclaredRecordCount"),
             },
             "control_process_reference": {
                 "control_process_ref_id": FieldMapping(source_name="ControlProcessRefId"),
@@ -394,6 +396,9 @@ def get_src_c() -> ProfileDefinition:
                 "evidence_family": FieldMapping(source_name="evidenceFamily"),
                 "presence_state": FieldMapping(
                     source_name="presenceState", path=["details", "presenceState"]
+                ),
+                "declared_record_count": FieldMapping(
+                    source_name="declaredRecordCount", path=["details", "declaredRecordCount"]
                 ),
             },
             "control_process_reference": {
@@ -607,6 +612,7 @@ def get_src_d(json_mode: Literal["array", "lines"] = "array") -> ProfileDefiniti
                 "submission_id": FieldMapping(source_name="sub_id"),
                 "evidence_family": FieldMapping(source_name="evi_family"),
                 "presence_state": FieldMapping(source_name="pre_state"),
+                "declared_record_count": FieldMapping(source_name="decl_rec_count"),
             },
             "control_process_reference": {
                 "control_process_ref_id": FieldMapping(source_name="con_pro_id"),
@@ -757,6 +763,7 @@ def get_src_e_v1() -> ProfileDefinition:
                 "submission_id": FieldMapping(source_name="submission_id"),
                 "evidence_family": FieldMapping(source_name="evidence_family"),
                 "presence_state": FieldMapping(source_name="presence_state"),
+                "declared_record_count": FieldMapping(source_name="declared_record_count"),
             },
             "control_process_reference": {
                 "control_process_ref_id": FieldMapping(source_name="control_process_ref_id"),
@@ -937,6 +944,7 @@ def get_src_e_v2() -> ProfileDefinition:
                 "submission_id": FieldMapping(source_name="sub_id"),
                 "evidence_family": FieldMapping(source_name="family_name"),
                 "presence_state": FieldMapping(source_name="presence_status"),
+                "declared_record_count": FieldMapping(source_name="decl_count"),
             },
             "control_process_reference": {
                 "control_process_ref_id": FieldMapping(source_name="ref_id"),

@@ -108,19 +108,33 @@ class Gate02SchemaBase(ValidationGate):
                     }
                     sev = getattr(item, "severity", None)
                     if sev is not None and sev not in valid_severities:
-                        issues.append(
-                            ValidationIssue(
-                                code="SCHEMA_INVALID_VOCABULARY",
-                                severity=GateSeverity.BLOCKING,
-                                gate_index=2,
-                                gate_name=self.gate_name,
-                                scope=f"alert[{idx}]",
-                                target=str(item.alert_id),
-                                message=f"Invalid alert severity vocabulary '{sev}'",
-                                expected=f"One of {valid_severities}",
-                                actual=str(sev),
+                        is_auth = False
+                        if context.ledger:
+                            for entry in context.ledger.entries.values():
+                                t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                                m_tp = str(getattr(entry, "mutation_type", ""))
+                                if "." in m_tp:
+                                    m_tp = m_tp.split(".")[-1]
+                                if str(item.alert_id) in t_ids and m_tp in (
+                                    "MALFORMED_VALUE",
+                                    "VOCABULARY_DRIFT",
+                                ):
+                                    is_auth = True
+                                    break
+                        if not is_auth:
+                            issues.append(
+                                ValidationIssue(
+                                    code="SCHEMA_INVALID_VOCABULARY",
+                                    severity=GateSeverity.BLOCKING,
+                                    gate_index=2,
+                                    gate_name=self.gate_name,
+                                    scope=f"alert[{idx}]",
+                                    target=str(item.alert_id),
+                                    message=f"Invalid alert severity vocabulary '{sev}'",
+                                    expected=f"One of {valid_severities}",
+                                    actual=str(sev),
+                                )
                             )
-                        )
 
         counts = {f: len(records.get(f, [])) for f in _EXPECTED_18_FAMILIES}
         return self.create_report(issues, metadata={"record_counts": counts})

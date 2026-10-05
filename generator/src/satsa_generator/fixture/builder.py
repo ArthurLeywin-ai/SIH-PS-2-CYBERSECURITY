@@ -762,7 +762,7 @@ def _build_m5_fixture_internal(
         "process_change": list(base_records[17]),
     }
 
-    # 1. M3 Source Rendering & Reconstruction
+    # 1. Execute M4 Scenario Engine (realizing operational state)
     from satsa_generator.canonical.reconstruction import reconstruct_canonical_oracle_from_disk
     from satsa_generator.profiles.catalog import get_profile
     from satsa_generator.quality.engine import QualityMutationEngine
@@ -772,6 +772,14 @@ def _build_m5_fixture_internal(
     from satsa_generator.validation.leakage import ComprehensiveLeakageScanner
     from satsa_generator.validation.models import ValidationContext
 
+    scenario_engine = ScenarioEngine(ids, seeds)
+    scenario_result = scenario_engine.run_scenarios(records_dict)
+    scenario_mutated_records = scenario_result.records
+    gt_records = scenario_result.ground_truth_records
+    scenario_receipts = scenario_result.receipts
+    ledger = scenario_engine.ledger
+
+    # 2. Render M3 Source Exports & Reconstruct Canonical Reference from Finalized M4 State
     profile_a = get_profile("SRC-A")
     profile_b = get_profile("SRC-B")
     profile_c = get_profile("SRC-C")
@@ -786,24 +794,24 @@ def _build_m5_fixture_internal(
 
     engines = [engine_a, engine_b, engine_c, engine_d, engine_e]
     families_to_render = [
-        ("organization", base_records[0]),
-        ("submission", base_records[1]),
-        ("submission_manifest", base_records[2]),
-        ("submission_family", base_records[3]),
-        ("control_process_reference", base_records[4]),
-        ("control_process_subject_link", base_records[5]),
-        ("asset", base_records[6]),
-        ("monitoring_coverage", base_records[7]),
-        ("alert", base_records[8]),
-        ("case", base_records[9]),
-        ("case_alert_link", base_records[10]),
-        ("investigation", base_records[11]),
-        ("escalation", base_records[12]),
-        ("action", base_records[13]),
-        ("resolution", base_records[14]),
-        ("closure", base_records[15]),
-        ("exception", base_records[16]),
-        ("process_change", base_records[17]),
+        ("organization", scenario_mutated_records["organization"]),
+        ("submission", scenario_mutated_records["submission"]),
+        ("submission_manifest", scenario_mutated_records["submission_manifest"]),
+        ("submission_family", scenario_mutated_records["submission_family"]),
+        ("control_process_reference", scenario_mutated_records["control_process_reference"]),
+        ("control_process_subject_link", scenario_mutated_records["control_process_subject_link"]),
+        ("asset", scenario_mutated_records["asset"]),
+        ("monitoring_coverage", scenario_mutated_records["monitoring_coverage"]),
+        ("alert", scenario_mutated_records["alert"]),
+        ("case", scenario_mutated_records["case"]),
+        ("case_alert_link", scenario_mutated_records["case_alert_link"]),
+        ("investigation", scenario_mutated_records["investigation"]),
+        ("escalation", scenario_mutated_records["escalation"]),
+        ("action", scenario_mutated_records["action"]),
+        ("resolution", scenario_mutated_records["resolution"]),
+        ("closure", scenario_mutated_records["closure"]),
+        ("exception", scenario_mutated_records["exception"]),
+        ("process_change", scenario_mutated_records["process_change"]),
     ]
 
     for engine in engines:
@@ -812,7 +820,7 @@ def _build_m5_fixture_internal(
                 engine.render_and_write(
                     "case",
                     rec_list,
-                    relationship_records=base_records[10],
+                    relationship_records=scenario_mutated_records["case_alert_link"],
                     relationship_subject_field="case_id",
                     relationship_object_field="case_id",
                     relationship_target_field="alert_id",
@@ -821,7 +829,7 @@ def _build_m5_fixture_internal(
                 engine.render_and_write(
                     "alert",
                     rec_list,
-                    relationship_records=base_records[10],
+                    relationship_records=scenario_mutated_records["case_alert_link"],
                     relationship_subject_field="alert_id",
                     relationship_object_field="alert_id",
                     relationship_target_field="case_id",
@@ -853,15 +861,7 @@ def _build_m5_fixture_internal(
             json_mod.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
         )
 
-    # 2. Execute M4 Scenario Engine
-    scenario_engine = ScenarioEngine(ids, seeds)
-    scenario_result = scenario_engine.run_scenarios(records_dict)
-    scenario_mutated_records = scenario_result.records
-    gt_records = scenario_result.ground_truth_records
-    scenario_receipts = scenario_result.receipts
-    ledger = scenario_engine.ledger
-
-    # 3. Execute M5 Data-Quality Mutation Engine (with source mutations)
+    # 3. Execute M5 Data-Quality Mutation Engine (with exact source mutations)
     quality_engine = QualityMutationEngine(ids, seeds, ledger)
     quality_result = quality_engine.execute_quality_mutations(
         scenario_mutated_records,

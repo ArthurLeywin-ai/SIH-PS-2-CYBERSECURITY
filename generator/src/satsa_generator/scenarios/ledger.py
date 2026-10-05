@@ -196,19 +196,8 @@ class AuthorizationLedger:
             )
 
         entry = self._entries[auth_id]
-        # Update status to APPLIED (create new immutable entry)
-        updated = AuthorizationEntry(
-            authorization_id=entry.authorization_id,
-            scenario_id=entry.scenario_id,
-            plan_id=entry.plan_id,
-            realization=entry.realization,
-            target_record_ids=entry.target_record_ids,
-            target_family=entry.target_family,
-            mutation_type=entry.mutation_type,
-            expected_semantic_effect=entry.expected_semantic_effect,
-            seed_label=entry.seed_label,
-            status=AuthorizationStatus.APPLIED,
-        )
+        # Update status to APPLIED (create new immutable entry preserving all metadata)
+        updated = entry.model_copy(update={"status": AuthorizationStatus.APPLIED})
         self._entries[auth_id] = updated
         self._consumed.add(auth_id)
 
@@ -228,18 +217,7 @@ class AuthorizationLedger:
                 f"Cannot validate authorization '{authorization_id}' "
                 f"in status '{entry.status}' (expected APPLIED)",
             )
-        updated = AuthorizationEntry(
-            authorization_id=entry.authorization_id,
-            scenario_id=entry.scenario_id,
-            plan_id=entry.plan_id,
-            realization=entry.realization,
-            target_record_ids=entry.target_record_ids,
-            target_family=entry.target_family,
-            mutation_type=entry.mutation_type,
-            expected_semantic_effect=entry.expected_semantic_effect,
-            seed_label=entry.seed_label,
-            status=AuthorizationStatus.VALIDATED,
-        )
+        updated = entry.model_copy(update={"status": AuthorizationStatus.VALIDATED})
         self._entries[authorization_id] = updated
 
     def mark_failed(self, authorization_id: str) -> None:
@@ -249,18 +227,7 @@ class AuthorizationLedger:
                 f"Cannot mark unknown authorization as failed: '{authorization_id}'",
             )
         entry = self._entries[authorization_id]
-        updated = AuthorizationEntry(
-            authorization_id=entry.authorization_id,
-            scenario_id=entry.scenario_id,
-            plan_id=entry.plan_id,
-            realization=entry.realization,
-            target_record_ids=entry.target_record_ids,
-            target_family=entry.target_family,
-            mutation_type=entry.mutation_type,
-            expected_semantic_effect=entry.expected_semantic_effect,
-            seed_label=entry.seed_label,
-            status=AuthorizationStatus.FAILED,
-        )
+        updated = entry.model_copy(update={"status": AuthorizationStatus.FAILED})
         self._entries[authorization_id] = updated
 
     def is_authorized(self, target_record_id: str, mutation_type: str) -> bool:
