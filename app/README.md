@@ -289,7 +289,7 @@ REST API Endpoints & Examiner Persistence (/api/v1/analytics/*)
 ### 9.2 The Supervisory Signal Contract
 
 Every generated signal implements a strict typed contract (`SupervisorySignal` dataclass & `SupervisorySignalModel`):
-- `signal_id`: Unique deterministic UUID.
+- `signal_id`: Unique deterministic UUID5 derived from a stable natural key (`organization_id`, `submission_id`, `detector_id`, `detector_version`, `signal_type`, `finding_key`, `affected_record_ids`, `basis_identity`). Identical inputs produce identical IDs across runs.
 - `organization_id`: Target entity identifier.
 - `submission_id`: Applicable submission reporting period.
 - `signal_type`: Deterministic category (`EXECUTION_GAP`, `NEGATIVE_SPACE`, `STATISTICAL_ANOMALY`, `PEER_DEVIATION`, `OPERATIONAL_DRIFT`).
@@ -297,34 +297,48 @@ Every generated signal implements a strict typed contract (`SupervisorySignal` d
 - `title`: Concise supervisory title.
 - `short_rationale`: 1-2 sentence executive summary for examiners.
 - `detailed_explanation`: Complete multi-paragraph factual rationale.
-- `basis`: Typed calculation dictionary containing metrics, thresholds, baselines, and deviations.
+- `basis`: Typed calculation dictionary containing metrics, sample sizes, thresholds, baselines, and deviations.
 - `observed_value` & `expected_value`: Explicit quantitative or categorical comparison points.
 - `confidence`: Calibrated strength indicator [0.0, 1.0].
-- `evidence_references`: Granular links with `record_id`, `evidence_family`, `field_path`, `role`, and source file location.
+- `evidence_references`: Granular links with `record_id`, `evidence_family`, `field_path`, `role` (`TRIGGER`, `SUPPORTING`, `BASELINE_MEMBER`, `PEER_MEMBER`, `MISSING_EXPECTATION`), and source file location. Every queueable signal guarantees non-empty evidence references.
 - `affected_record_ids`: Explicit primary key list of operational records involved.
 - `detector_id` & `detector_version`: Immutable detector provenance.
 - `investigation_questions`: Actionable questions tailored for human examiners.
-- `generated_at_utc`: Deterministic ISO 8601 UTC timestamp.
+- `generated_at_utc`: ISO 8601 UTC execution timestamp (separated from analytical identity).
 
-### 9.3 Supervisory Semantics & Cautionary Phrasing
+### 9.3 Submission Isolation & Provenance-Backed Scoping
+
+When `analyze_submission(submission_id)` is invoked, operational evidence is strictly filtered through `evidence_provenance.submission_id`. Canonical operational records from another submission belonging to the same organization are never commingled into feature extraction, workflow linking, or signal evidence references.
+
+### 9.4 Peer Cohort Guardrails & Defensible Statistics
+
+- **No Silent Peer Fallback**: The peer comparison detector enforces exact cohort matching (`scale_band` and `operating_model`). If fewer than the minimum cohort threshold (3) matching organizations exist, the detector produces no peer deviation signal rather than silently falling back to broader cohorts.
+- **Defensible Statistical Anomalies**: Pure statistical detection enforces minimum sample-size guardrails ($n \ge 3$) using robust statistical methods (historical median and MAD). Every statistical signal explicitly exposes sample size, baseline method, thresholds, and observed deviations in its basis dictionary.
+
+### 9.5 Supervisory Semantics & Neutral Analytical Phrasing
 
 The engine strictly adheres to supervisory jurisprudence:
 > **A supervisory signal indicates "requires examiner attention / inquiry", NEVER "wrongdoing proved".**
 > **Absence of evidence is NEVER proof that an action never occurred.**
 
 Explanations are strictly framed with cautious, neutral phrasing:
-- *"No supporting record was observed"*
-- *"Evidence gap detected requiring examiner inquiry"*
-- *"The absence of records in this submission does not constitute conclusive proof that the operational activity did not occur"*
+- *"Under configured analytical expectations..."*
+- *"The submitted operational evidence does not show..."*
+- *"This pattern warrants examiner verification..."*
+- Zero unbacked statutory or regulatory policy claims.
 
-### 9.4 Entity-Level Supervisory Attention Indicator
+### 9.6 Entity-Level Supervisory Attention Indicator
 
-Rather than an arbitrary "risk score", the engine computes an explainable **Supervisory Attention Indicator** (bounded between `0.0` and `100.0`):
-- **Deterministic formula**: Weighted combination of signal severity base scores, signal diversity, and evidence gap indexes.
+Rather than an arbitrary point tally or "risk score", the engine computes an explainable **Supervisory Attention Indicator** (bounded between `0.0` and `100.0`):
+- **Deterministic formula**: Fully decomposable into:
+  - Severity Contribution: $C_{\text{sev}} = \min(70.0, \sum w_{\text{sev}} \times \text{confidence})$
+  - Diversity Contribution: $C_{\text{div}} = \min(15.0, (\text{types} - 1) \times 3.75)$
+  - Data Quality Gap Contribution: $C_{\text{dq}} = \min(15.0, \frac{\text{negative\_space\_count}}{\text{total\_signals}} \times 15.0)$
+  - Total Raw Score: $C_{\text{sev}} + C_{\text{div}} + C_{\text{dq}}$ (bounded 0.0 to 100.0)
 - **Categorical Bands**: `LOW` (0-20), `MODERATE` (21-45), `ELEVATED` (46-70), `HIGH` (71-100).
-- **Fully Decomposable**: Includes breakdown by signal type, severity distribution, top 5 strongest signals, and human-readable summary rationale.
+- **Fully Decomposable**: Exposes `score_decomposition` containing exact component contributions in summary outputs and database storage.
 
-### 9.5 Analytics REST API Endpoints
+### 9.7 Analytics REST API Endpoints
 
 - `POST /api/v1/analytics/run`: Executes analytics for an organization or submission, returning signals and attention summary. Supports `persist=true`.
 - `GET /api/v1/analytics/signals`: Lists persisted supervisory signals with pagination (`limit`, `offset`) and filtering (`organization_id`, `submission_id`, `signal_type`, `severity`).
@@ -335,7 +349,7 @@ Rather than an arbitrary "risk score", the engine computes an explainable **Supe
 
 ## 10. Testing & Verification
 
-The application test suite covers 73 automated tests verifying all layers:
+The application test suite covers 80 automated tests verifying all layers:
 
 ```bash
 # Run application test suite
@@ -352,6 +366,7 @@ generator/venv/bin/ruff check app
 ```
 
 Test breakdown:
+- `app/tests/integration/test_m7_remediation_blockers.py`: Authoritative tests for true determinism under identical inputs, submission scoping with multi-submission isolation, evidence reference traceability, no silent peer cohort fallback, decomposable attention scoring, statistical anomaly sample-size guardrails, and neutral supervisory phrasing.
 - `app/tests/unit/test_analytics_features.py`: Deterministic feature extraction, counts, rates, durations, empty population behavior, and pure statistics utilities (`median`, `MAD`, `IQR`).
 - `app/tests/unit/test_detectors.py`: Comprehensive tests for all 5 detectors + Attention Aggregator, testing clean workflows, unlinked alerts, temporal inversions, missing families, count discrepancies, duration outliers, peer deviation cohorts, drift thresholds, and zero baseline handling.
 - `app/tests/unit/test_analytics_isolation.py`: Verifies zero references or imports of `private_ground_truth`, scenario labels, oracle data, or generator metadata.

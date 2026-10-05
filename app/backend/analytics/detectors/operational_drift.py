@@ -5,20 +5,23 @@ Implements temporal comparison across submissions for the same organization (ARC
 - Enforces minimum sample size guardrails to avoid flagging trivial fluctuations
 - Evaluates alert volume trends, closure-rate shifts, and coverage degradation
 - Records baseline period, comparison period, absolute change, and relative change
+- Every signal includes concrete evidence references to current and baseline operational scope
 """
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 
 from app.backend.analytics.evidence import EvidenceResolver
 from app.backend.analytics.explanations import format_operational_drift_explanation
 from app.backend.analytics.features import EntityPeriodFeatures
 from app.backend.analytics.models import (
+    EvidenceReference,
+    EvidenceRole,
     SignalSeverity,
     SignalType,
     SupervisorySignal,
+    generate_deterministic_signal_id,
 )
 
 
@@ -50,8 +53,6 @@ class OperationalDriftDetector:
             # Insufficient history guardrail: single period has no baseline (ARCHITECTURE.md §10.2)
             return []
 
-        # Sort historical submissions to pick the immediately preceding baseline
-        # (or average across preceding)
         prior_sorted = sorted(
             [pf for pf in prior_features_list if pf.submission_id != current_features.submission_id],
             key=lambda x: str(x.submission_id),
@@ -84,9 +85,57 @@ class OperationalDriftDetector:
                     baseline_period=base_period,
                     pct_change=pct_change,
                 )
+
+                refs: list[EvidenceReference] = []
+                affected_ids: list[str] = []
+
+                # Current period sample alerts
+                for a in current_features.alerts[:5]:
+                    aid = str(a.alert_id)
+                    affected_ids.append(aid)
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=aid,
+                            evidence_family="alerts",
+                            role=EvidenceRole.TRIGGER,
+                            description=f"Current period alert {aid} contributing to volume {curr_vol}",
+                        )
+                    )
+
+                # Scope references
+                if current_features.submission_id:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=current_features.submission_id,
+                            evidence_family="submissions",
+                            role=EvidenceRole.TRIGGER,
+                            description=f"Current reporting period submission {curr_period}",
+                        )
+                    )
+                if baseline.submission_id:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=baseline.submission_id,
+                            evidence_family="submissions",
+                            role=EvidenceRole.BASELINE_MEMBER,
+                            description=f"Baseline comparison submission {base_period} (volume={base_vol})",
+                        )
+                    )
+
+                signal_id = generate_deterministic_signal_id(
+                    organization_id=current_features.organization_id,
+                    submission_id=current_features.submission_id,
+                    detector_id=self.DETECTOR_ID,
+                    detector_version=self.DETECTOR_VERSION,
+                    signal_type=SignalType.OPERATIONAL_DRIFT.value,
+                    finding_key="alert_volume_drift",
+                    affected_record_ids=sorted(affected_ids),
+                    basis_identity=f"vol:{curr_vol}:{base_vol}:{curr_period}:{base_period}",
+                )
+
                 signals.append(
                     SupervisorySignal(
-                        signal_id=str(uuid.uuid4()),
+                        signal_id=signal_id,
                         organization_id=current_features.organization_id,
                         submission_id=current_features.submission_id,
                         signal_type=SignalType.OPERATIONAL_DRIFT,
@@ -106,8 +155,8 @@ class OperationalDriftDetector:
                         observed_value=curr_vol,
                         expected_value=base_vol,
                         confidence=0.86,
-                        evidence_references=[],
-                        affected_record_ids=[],
+                        evidence_references=refs,
+                        affected_record_ids=sorted(affected_ids),
                         detector_id=self.DETECTOR_ID,
                         detector_version=self.DETECTOR_VERSION,
                         investigation_questions=questions,
@@ -130,9 +179,58 @@ class OperationalDriftDetector:
                     baseline_period=base_period,
                     pct_change=pct_change,
                 )
+
+                refs = []
+                affected_ids = []
+
+                # Current open cases
+                for c in current_features.cases:
+                    if (c.status or "").upper() != "CLOSED":
+                        cid = str(c.case_id)
+                        affected_ids.append(cid)
+                        if len(refs) < 5:
+                            refs.append(
+                                self.resolver.build_reference(
+                                    record_id=cid,
+                                    evidence_family="cases",
+                                    role=EvidenceRole.TRIGGER,
+                                    description=f"Current period open case {cid}",
+                                )
+                            )
+
+                if current_features.submission_id:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=current_features.submission_id,
+                            evidence_family="submissions",
+                            role=EvidenceRole.TRIGGER,
+                            description=f"Current reporting period submission {curr_period} (closure={curr_rate:.1%})",
+                        )
+                    )
+                if baseline.submission_id:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=baseline.submission_id,
+                            evidence_family="submissions",
+                            role=EvidenceRole.BASELINE_MEMBER,
+                            description=f"Baseline comparison submission {base_period} (closure={base_rate:.1%})",
+                        )
+                    )
+
+                signal_id = generate_deterministic_signal_id(
+                    organization_id=current_features.organization_id,
+                    submission_id=current_features.submission_id,
+                    detector_id=self.DETECTOR_ID,
+                    detector_version=self.DETECTOR_VERSION,
+                    signal_type=SignalType.OPERATIONAL_DRIFT.value,
+                    finding_key="closure_rate_degradation",
+                    affected_record_ids=sorted(affected_ids),
+                    basis_identity=f"closure:{curr_rate:.4f}:{base_rate:.4f}:{curr_period}:{base_period}",
+                )
+
                 signals.append(
                     SupervisorySignal(
-                        signal_id=str(uuid.uuid4()),
+                        signal_id=signal_id,
                         organization_id=current_features.organization_id,
                         submission_id=current_features.submission_id,
                         signal_type=SignalType.OPERATIONAL_DRIFT,
@@ -151,8 +249,8 @@ class OperationalDriftDetector:
                         observed_value=round(curr_rate, 4),
                         expected_value=round(base_rate, 4),
                         confidence=0.90,
-                        evidence_references=[],
-                        affected_record_ids=[],
+                        evidence_references=refs,
+                        affected_record_ids=sorted(affected_ids),
                         detector_id=self.DETECTOR_ID,
                         detector_version=self.DETECTOR_VERSION,
                         investigation_questions=questions,
@@ -172,9 +270,63 @@ class OperationalDriftDetector:
                     baseline_period=base_period,
                     pct_change=-cov_drop,
                 )
+
+                refs = []
+                affected_ids = []
+
+                for aid in current_features.unmonitored_critical_asset_ids[:5]:
+                    affected_ids.append(aid)
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=aid,
+                            evidence_family="assets",
+                            role=EvidenceRole.TRIGGER,
+                            description=f"Current asset {aid} lacks active coverage",
+                        )
+                    )
+
+                if current_features.submission_id:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=current_features.submission_id,
+                            evidence_family="submissions",
+                            role=EvidenceRole.TRIGGER,
+                            description=(
+                                f"Current submission {curr_period} "
+                                f"(coverage={current_features.monitoring_coverage_rate:.1%})"
+                            ),
+                        )
+                    )
+                if baseline.submission_id:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=baseline.submission_id,
+                            evidence_family="submissions",
+                            role=EvidenceRole.BASELINE_MEMBER,
+                            description=(
+                                f"Baseline submission {base_period} "
+                                f"(coverage={baseline.monitoring_coverage_rate:.1%})"
+                            ),
+                        )
+                    )
+
+                signal_id = generate_deterministic_signal_id(
+                    organization_id=current_features.organization_id,
+                    submission_id=current_features.submission_id,
+                    detector_id=self.DETECTOR_ID,
+                    detector_version=self.DETECTOR_VERSION,
+                    signal_type=SignalType.OPERATIONAL_DRIFT.value,
+                    finding_key="coverage_rate_drop",
+                    affected_record_ids=sorted(affected_ids),
+                    basis_identity=(
+                        f"cov:{current_features.monitoring_coverage_rate:.4f}:"
+                        f"{baseline.monitoring_coverage_rate:.4f}:{curr_period}:{base_period}"
+                    ),
+                )
+
                 signals.append(
                     SupervisorySignal(
-                        signal_id=str(uuid.uuid4()),
+                        signal_id=signal_id,
                         organization_id=current_features.organization_id,
                         submission_id=current_features.submission_id,
                         signal_type=SignalType.OPERATIONAL_DRIFT,
@@ -193,8 +345,8 @@ class OperationalDriftDetector:
                         observed_value=round(current_features.monitoring_coverage_rate, 4),
                         expected_value=round(baseline.monitoring_coverage_rate, 4),
                         confidence=0.92,
-                        evidence_references=[],
-                        affected_record_ids=[],
+                        evidence_references=refs,
+                        affected_record_ids=sorted(affected_ids),
                         detector_id=self.DETECTOR_ID,
                         detector_version=self.DETECTOR_VERSION,
                         investigation_questions=questions,

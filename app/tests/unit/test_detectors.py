@@ -483,11 +483,15 @@ def test_attention_aggregator_bounded_and_explainable():
 
     summary = aggregator.aggregate(organization_id="org-test", signals=[crit_signal, high_signal])
     assert summary.total_signals == 2
-    # Base: 25 (CRITICAL) + 15 (HIGH) = 40. Diversity: 2 * 2 = 4 -> 44.0
-    assert summary.attention_score == 44.0
+    # Decomposable: Severity (20*0.95 + 12*0.9 = 29.8) + Diversity ((2-1)*3.75 = 3.75)
+    # + Data Quality (0.5*15 = 7.5) = 41.05
+    assert summary.score_decomposition["severity_contribution"] == 29.80
+    assert summary.score_decomposition["diversity_contribution"] == 3.75
+    assert summary.score_decomposition["data_quality_gap_contribution"] == 7.50
+    assert summary.attention_score == 41.05
     assert summary.attention_band == "MODERATE"
     assert len(summary.strongest_signals) == 2
-    assert summary.data_quality_gap_index > 0.0
+    assert summary.data_quality_gap_index == 0.5
 
 
 # ---------------------------------------------------------------------------

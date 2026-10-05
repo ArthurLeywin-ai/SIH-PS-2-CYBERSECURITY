@@ -243,7 +243,7 @@ class IngestionPipeline:
 
         if not has_errors:
             # 6. Canonical Normalization
-            normalizer = EvidenceNormalizer()
+            normalizer = EvidenceNormalizer(submissions=records_by_family.get("submissions", []))
             normalized_by_family: dict[str, list[Any]] = {}
 
             # Strict dependency ordering

@@ -42,10 +42,57 @@ logger = get_logger("ingestion.normalizer")
 class EvidenceNormalizer:
     """Normalizes raw parsed dictionary records into database models with provenance."""
 
-    def __init__(self) -> None:
+    def __init__(self, submissions: list[dict[str, Any]] | None = None) -> None:
         self.provenance_records: list[EvidenceProvenanceModel] = []
         self.observations: list[CanonicalFieldObservationModel] = []
         self.seen_ids: dict[str, set[str]] = {}
+        self.case_submission_map: dict[str, str] = {}
+        self.case_org_map: dict[str, str] = {}
+        self.submissions_by_org: dict[str, list[dict[str, Any]]] = {}
+        if submissions:
+            self.register_submissions(submissions)
+
+    def register_submissions(self, submissions: list[dict[str, Any]]) -> None:
+        """Register submission context for temporal and organizational record scoping."""
+        for s in submissions:
+            org_id = str(s.get("organization_id"))
+            self.submissions_by_org.setdefault(org_id, []).append(s)
+
+    def _resolve_submission_id(self, org_id: str, raw: dict[str, Any]) -> str | None:
+        """Deterministically determine the submission_id for an operational record."""
+        if raw.get("submission_id"):
+            return str(raw["submission_id"])
+
+        case_id = raw.get("case_id")
+        if case_id and str(case_id) in self.case_submission_map:
+            return self.case_submission_map[str(case_id)]
+
+        org_subs = self.submissions_by_org.get(org_id, [])
+        if not org_subs:
+            return None
+        if len(org_subs) == 1:
+            return str(org_subs[0].get("submission_id"))
+
+        # Multiple submissions for entity: match temporal coverage
+        rec_dt = (
+            self._parse_datetime(raw.get("created_at_utc"))
+            or self._parse_datetime(raw.get("started_at_utc"))
+            or self._parse_datetime(raw.get("escalated_at_utc"))
+            or self._parse_datetime(raw.get("resolved_at_utc"))
+            or self._parse_datetime(raw.get("closed_at_utc"))
+            or self._parse_datetime(raw.get("effective_start_at_utc"))
+            or self._parse_datetime(raw.get("effective_at_utc"))
+            or self._parse_datetime(raw.get("linked_at_utc"))
+        )
+        if rec_dt:
+            for sub in org_subs:
+                s_start = self._parse_datetime(sub.get("reporting_period_start_at_utc"))
+                s_end = self._parse_datetime(sub.get("reporting_period_end_at_utc"))
+                if s_start and s_end and s_start <= rec_dt <= s_end:
+                    return str(sub.get("submission_id"))
+
+        # Fallback to first submission if no period matched
+        return str(org_subs[0].get("submission_id"))
 
     @staticmethod
     def _get_pk(family: str, raw: dict[str, Any]) -> str | None:
@@ -62,6 +109,10 @@ class EvidenceNormalizer:
             pk_field = "control_process_link_id"
         elif family == "case_alert_links":
             pk_field = "case_alert_link_id"
+        elif family == "exceptions":
+            pk_field = "exception_id"
+        elif family == "process_changes":
+            pk_field = "process_change_id"
         val = raw.get(pk_field)
         return str(val) if val else None
 
@@ -88,11 +139,12 @@ class EvidenceNormalizer:
                 # per DATA_SCHEMA.md §VAL-003, but avoid duplicate database insertion
                 locator = f"row:{idx}"
                 org_id = str(raw.get("organization_id", "UNKNOWN"))
+                sub_id = self._resolve_submission_id(org_id, raw)
                 self._record_provenance(
                     pk_val,
                     family,
                     org_id,
-                    str(raw.get("submission_id")) if raw.get("submission_id") else None,
+                    sub_id,
                     source_file,
                     locator,
                     "duplicate_record",
@@ -330,6 +382,19 @@ class EvidenceNormalizer:
     ) -> SubmissionEvidenceFamilyModel:
         fam_id = str(raw["submission_family_id"])
         sub_id = str(raw["submission_id"])
+        org_id = str(raw.get("organization_id", "UNKNOWN"))
+        locator = f"row:{idx}"
+        self._record_provenance(
+            fam_id,
+            "submission_evidence_families",
+            org_id,
+            sub_id,
+            source_file,
+            locator,
+            "submission_family_id",
+            "submission_family_id",
+            fam_id,
+        )
         return SubmissionEvidenceFamilyModel(
             submission_family_id=fam_id,
             submission_id=sub_id,
@@ -343,6 +408,19 @@ class EvidenceNormalizer:
     ) -> ControlProcessReferenceModel:
         ref_id = str(raw["control_process_ref_id"])
         org_id = str(raw["organization_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            ref_id,
+            "control_process_references",
+            org_id,
+            sub_id,
+            source_file,
+            locator,
+            "control_process_ref_id",
+            "control_process_ref_id",
+            ref_id,
+        )
         return ControlProcessReferenceModel(
             control_process_ref_id=ref_id,
             organization_id=org_id,
@@ -359,6 +437,20 @@ class EvidenceNormalizer:
     ) -> ControlProcessSubjectLinkModel:
         link_id = str(raw["control_process_link_id"])
         ref_id = str(raw["control_process_ref_id"])
+        org_id = str(raw.get("organization_id", "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            link_id,
+            "control_process_subject_links",
+            org_id,
+            sub_id,
+            source_file,
+            locator,
+            "control_process_link_id",
+            "control_process_link_id",
+            link_id,
+        )
         return ControlProcessSubjectLinkModel(
             control_process_link_id=link_id,
             control_process_ref_id=ref_id,
@@ -369,9 +461,10 @@ class EvidenceNormalizer:
     def _normalize_assets(self, raw: dict[str, Any], source_file: str, idx: int) -> AssetModel:
         asset_id = str(raw["asset_id"])
         org_id = str(raw["organization_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
         locator = f"row:{idx}"
         self._record_provenance(
-            asset_id, "assets", org_id, None, source_file, locator, "asset_id", "asset_id", asset_id
+            asset_id, "assets", org_id, sub_id, source_file, locator, "asset_id", "asset_id", asset_id
         )
 
         return AssetModel(
@@ -391,12 +484,13 @@ class EvidenceNormalizer:
         cov_id = str(raw["monitoring_coverage_id"])
         org_id = str(raw["organization_id"])
         asset_id = str(raw["asset_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
         locator = f"row:{idx}"
         self._record_provenance(
             cov_id,
             "monitoring_coverage",
             org_id,
-            None,
+            sub_id,
             source_file,
             locator,
             "asset_id",
@@ -426,15 +520,16 @@ class EvidenceNormalizer:
         alert_id = str(raw["alert_id"])
         org_id = str(raw["organization_id"])
         asset_id = str(raw["asset_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
         locator = f"row:{idx}"
         self._record_provenance(
-            alert_id, "alerts", org_id, None, source_file, locator, "alert_id", "alert_id", alert_id
+            alert_id, "alerts", org_id, sub_id, source_file, locator, "alert_id", "alert_id", alert_id
         )
         self._record_provenance(
             alert_id,
             "alerts",
             org_id,
-            None,
+            sub_id,
             source_file,
             locator,
             "asset_id",
@@ -469,8 +564,11 @@ class EvidenceNormalizer:
     def _normalize_cases(self, raw: dict[str, Any], source_file: str, idx: int) -> CaseModel:
         case_id = str(raw["case_id"])
         org_id = str(raw["organization_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
+        self.case_submission_map[case_id] = sub_id or ""
+        self.case_org_map[case_id] = org_id
         locator = f"row:{idx}"
-        self._record_provenance(case_id, "cases", org_id, None, source_file, locator, "case_id", "case_id", case_id)
+        self._record_provenance(case_id, "cases", org_id, sub_id, source_file, locator, "case_id", "case_id", case_id)
         status_val = raw.get("status") or raw.get("case_status", "OPEN")
         self._record_observation(case_id, "cases", "status", status_val, status_val)
 
@@ -495,12 +593,14 @@ class EvidenceNormalizer:
         link_id = str(raw["case_alert_link_id"])
         case_id = str(raw["case_id"])
         alert_id = str(raw["alert_id"])
+        org_id = str(raw.get("organization_id") or self.case_org_map.get(case_id, "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
         locator = f"row:{idx}"
         self._record_provenance(
             link_id,
             "case_alert_links",
-            "UNKNOWN",
-            None,
+            org_id,
+            sub_id,
             source_file,
             locator,
             "case_id",
@@ -512,8 +612,8 @@ class EvidenceNormalizer:
         self._record_provenance(
             link_id,
             "case_alert_links",
-            "UNKNOWN",
-            None,
+            org_id,
+            sub_id,
             source_file,
             locator,
             "alert_id",
@@ -533,16 +633,26 @@ class EvidenceNormalizer:
 
     def _normalize_investigations(self, raw: dict[str, Any], source_file: str, idx: int) -> InvestigationModel:
         inv_id = str(raw["investigation_id"])
-        org_id = str(raw["organization_id"])
+        case_id = str(raw["case_id"]) if raw.get("case_id") else None
+        org_id = str(raw.get("organization_id") or (self.case_org_map.get(case_id) if case_id else "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
         locator = f"row:{idx}"
         self._record_provenance(
-            inv_id, "investigations", org_id, None, source_file, locator, "investigation_id", "investigation_id", inv_id
+            inv_id,
+            "investigations",
+            org_id,
+            sub_id,
+            source_file,
+            locator,
+            "investigation_id",
+            "investigation_id",
+            inv_id,
         )
 
         return InvestigationModel(
             investigation_id=inv_id,
             organization_id=org_id,
-            case_id=str(raw["case_id"]) if raw.get("case_id") else None,
+            case_id=case_id,
             alert_id=str(raw["alert_id"]) if raw.get("alert_id") else None,
             started_at_utc=self._parse_datetime(raw.get("started_at_utc")) or datetime.now(UTC),
             completed_at_utc=self._parse_datetime(raw.get("ended_at_utc") or raw.get("completed_at_utc")),
@@ -554,11 +664,17 @@ class EvidenceNormalizer:
 
     def _normalize_escalations(self, raw: dict[str, Any], source_file: str, idx: int) -> EscalationModel:
         esc_id = str(raw["escalation_id"])
-        org_id = str(raw["organization_id"])
+        case_id = str(raw["case_id"]) if raw.get("case_id") else None
+        org_id = str(raw.get("organization_id") or (self.case_org_map.get(case_id) if case_id else "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            esc_id, "escalations", org_id, sub_id, source_file, locator, "escalation_id", "escalation_id", esc_id
+        )
         return EscalationModel(
             escalation_id=esc_id,
             organization_id=org_id,
-            case_id=str(raw["case_id"]) if raw.get("case_id") else None,
+            case_id=case_id,
             alert_id=str(raw["alert_id"]) if raw.get("alert_id") else None,
             escalated_at_utc=self._parse_datetime(raw.get("escalated_at_utc")) or datetime.now(UTC),
             escalated_from_tier=raw.get("source_role_code") or raw.get("escalated_from_tier", "TIER_1"),
@@ -569,11 +685,17 @@ class EvidenceNormalizer:
 
     def _normalize_actions(self, raw: dict[str, Any], source_file: str, idx: int) -> ActionModel:
         act_id = str(raw["action_id"])
-        org_id = str(raw["organization_id"])
+        case_id = str(raw["case_id"]) if raw.get("case_id") else None
+        org_id = str(raw.get("organization_id") or (self.case_org_map.get(case_id) if case_id else "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            act_id, "actions", org_id, sub_id, source_file, locator, "action_id", "action_id", act_id
+        )
         return ActionModel(
             action_id=act_id,
             organization_id=org_id,
-            case_id=str(raw["case_id"]) if raw.get("case_id") else None,
+            case_id=case_id,
             alert_id=str(raw["alert_id"]) if raw.get("alert_id") else None,
             asset_id=str(raw["asset_id"]) if raw.get("asset_id") else None,
             action_type=raw.get("action_type", "INVESTIGATE"),
@@ -586,11 +708,17 @@ class EvidenceNormalizer:
 
     def _normalize_resolutions(self, raw: dict[str, Any], source_file: str, idx: int) -> ResolutionModel:
         res_id = str(raw["resolution_id"])
-        org_id = str(raw["organization_id"])
+        case_id = str(raw["case_id"]) if raw.get("case_id") else None
+        org_id = str(raw.get("organization_id") or (self.case_org_map.get(case_id) if case_id else "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            res_id, "resolutions", org_id, sub_id, source_file, locator, "resolution_id", "resolution_id", res_id
+        )
         return ResolutionModel(
             resolution_id=res_id,
             organization_id=org_id,
-            case_id=str(raw["case_id"]) if raw.get("case_id") else None,
+            case_id=case_id,
             alert_id=str(raw["alert_id"]) if raw.get("alert_id") else None,
             resolved_at_utc=self._parse_datetime(raw.get("resolved_at_utc")) or datetime.now(UTC),
             resolution_type=raw.get("resolution_type", "REMEDIATED"),
@@ -600,11 +728,17 @@ class EvidenceNormalizer:
 
     def _normalize_closures(self, raw: dict[str, Any], source_file: str, idx: int) -> ClosureModel:
         clo_id = str(raw["closure_id"])
-        org_id = str(raw["organization_id"])
+        case_id = str(raw["case_id"]) if raw.get("case_id") else None
+        org_id = str(raw.get("organization_id") or (self.case_org_map.get(case_id) if case_id else "UNKNOWN"))
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            clo_id, "closures", org_id, sub_id, source_file, locator, "closure_id", "closure_id", clo_id
+        )
         return ClosureModel(
             closure_id=clo_id,
             organization_id=org_id,
-            case_id=str(raw["case_id"]) if raw.get("case_id") else None,
+            case_id=case_id,
             alert_id=str(raw["alert_id"]) if raw.get("alert_id") else None,
             resolution_id=str(raw["resolution_id"]) if raw.get("resolution_id") else None,
             closed_at_utc=self._parse_datetime(raw.get("closed_at_utc")) or datetime.now(UTC),
@@ -617,6 +751,11 @@ class EvidenceNormalizer:
     def _normalize_exceptions(self, raw: dict[str, Any], source_file: str, idx: int) -> ExceptionModel:
         exc_id = str(raw["exception_id"])
         org_id = str(raw["organization_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            exc_id, "exceptions", org_id, sub_id, source_file, locator, "exception_id", "exception_id", exc_id
+        )
         return ExceptionModel(
             exception_id=exc_id,
             organization_id=org_id,
@@ -633,6 +772,19 @@ class EvidenceNormalizer:
     def _normalize_process_changes(self, raw: dict[str, Any], source_file: str, idx: int) -> ProcessChangeModel:
         chg_id = str(raw["process_change_id"])
         org_id = str(raw["organization_id"])
+        sub_id = self._resolve_submission_id(org_id, raw)
+        locator = f"row:{idx}"
+        self._record_provenance(
+            chg_id,
+            "process_changes",
+            org_id,
+            sub_id,
+            source_file,
+            locator,
+            "process_change_id",
+            "process_change_id",
+            chg_id,
+        )
         return ProcessChangeModel(
             process_change_id=chg_id,
             organization_id=org_id,

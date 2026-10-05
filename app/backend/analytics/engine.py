@@ -88,7 +88,31 @@ class SupervisoryAnalyticsEngine:
 
         # 3. Statistical Anomalies
         try:
-            sig_anom = self.anom_detector.detect(features)
+            hist_closures = (
+                [pf.case_closure_rate for pf in prior_features_list if pf.case_count >= 5]
+                if prior_features_list
+                else None
+            )
+            hist_durs: list[float] = []
+            if prior_features_list:
+                for pf in prior_features_list:
+                    hist_durs.extend(pf.investigation_durations_hours)
+            hist_dens = (
+                [
+                    (pf.alert_count / pf.asset_count)
+                    for pf in prior_features_list
+                    if pf.asset_count > 0 and pf.alert_count >= 20
+                ]
+                if prior_features_list
+                else None
+            )
+
+            sig_anom = self.anom_detector.detect(
+                features,
+                historical_closure_rates=hist_closures,
+                historical_durations=hist_durs if hist_durs else None,
+                historical_densities=hist_dens,
+            )
             signals.extend(sig_anom)
         except Exception as err:
             logger.error("Detector '%s' failed: %s", self.anom_detector.DETECTOR_ID, err, exc_info=True)

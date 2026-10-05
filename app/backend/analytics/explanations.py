@@ -31,7 +31,7 @@ def format_execution_gap_explanation(
     detailed = (
         f"Operational workflow progression analysis observed that {observed_count} out of {total_eligible} "
         f"eligible {stage_from} records do not possess linked or matching {stage_to} documentation in the submitted "
-        f"evidence package. In established supervisory standards, high-severity alerts and confirmed incidents are "
+        f"evidence package. Under configured analytical expectations, high-severity alerts and confirmed incidents are "
         f"expected to progress through formal triage, investigation, and disposition stages. "
         f"Affected records: [{id_preview}]. "
         f"This finding represents an observed documentation/workflow gap and warrants examiner inquiry."
@@ -65,7 +65,7 @@ def format_negative_space_explanation(
     if context_details:
         detailed += f"Additional context: {context_details}. "
     detailed += (
-        "In accordance with supervisory evidentiary standards, the absence of submitted evidence indicates an "
+        "Under configured analytical expectations, the absence of submitted evidence indicates an "
         "evidence gap requiring examiner verification, rather than conclusive proof that the operational activity "
         "did not occur."
     )

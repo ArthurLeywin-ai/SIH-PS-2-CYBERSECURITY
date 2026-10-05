@@ -148,6 +148,7 @@ class EntityPeriodFeatures:
     closures: list[ClosureModel] = field(default_factory=list)
     assets: list[AssetModel] = field(default_factory=list)
     coverage: list[MonitoringCoverageModel] = field(default_factory=list)
+    declared_families: list[SubmissionEvidenceFamilyModel] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert scalar features to a dictionary for API and logging."""
@@ -357,4 +358,5 @@ class FeatureExtractor:
             closures=clo_list,
             assets=ast_list,
             coverage=cov_list,
+            declared_families=fam_list,
         )

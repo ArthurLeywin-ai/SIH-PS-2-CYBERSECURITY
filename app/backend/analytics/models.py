@@ -9,6 +9,8 @@ Defines:
 
 from __future__ import annotations
 
+import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -25,6 +27,51 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
+
+SATSA_ANALYTICS_NAMESPACE = uuid.UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+
+
+def generate_deterministic_signal_id(
+    organization_id: str,
+    submission_id: str | None,
+    detector_id: str,
+    detector_version: str,
+    signal_type: str,
+    finding_key: str,
+    affected_record_ids: list[str] | None = None,
+    basis_identity: str | None = None,
+) -> str:
+    """Generate a deterministic UUID5 identifier for a supervisory signal based on natural keys.
+
+    Ensures identical analytical input yields identical signal IDs without random state or execution timestamps.
+    """
+    payload = {
+        "organization_id": str(organization_id),
+        "submission_id": str(submission_id or "NONE"),
+        "detector_id": str(detector_id),
+        "detector_version": str(detector_version),
+        "signal_type": str(signal_type),
+        "finding_key": str(finding_key),
+        "affected_record_ids": sorted(str(rid) for rid in (affected_record_ids or [])),
+        "basis_identity": str(basis_identity or ""),
+    }
+    raw_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return str(uuid.uuid5(SATSA_ANALYTICS_NAMESPACE, raw_str))
+
+
+def generate_deterministic_summary_id(
+    organization_id: str,
+    submission_id: str | None,
+    signal_ids: list[str],
+) -> str:
+    """Generate a deterministic UUID5 identifier for an attention summary based on natural keys."""
+    payload = {
+        "organization_id": str(organization_id),
+        "submission_id": str(submission_id or "NONE"),
+        "signal_ids": sorted(str(s) for s in signal_ids),
+    }
+    raw_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return str(uuid.uuid5(SATSA_ANALYTICS_NAMESPACE, raw_str))
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -164,6 +211,7 @@ class SupervisoryAttentionSummary:
     strongest_signals: list[SupervisorySignal] = field(default_factory=list)
     data_quality_gap_index: float = 0.0
     summary_rationale: str = ""
+    score_decomposition: dict[str, float] = field(default_factory=dict)
     generated_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
@@ -179,6 +227,7 @@ class SupervisoryAttentionSummary:
             "strongest_signals": [sig.to_dict() for sig in self.strongest_signals],
             "data_quality_gap_index": round(self.data_quality_gap_index, 4),
             "summary_rationale": self.summary_rationale,
+            "score_decomposition": self.score_decomposition,
             "generated_at_utc": self.generated_at_utc.isoformat(),
         }
 
@@ -255,6 +304,7 @@ class SupervisoryAttentionSummaryModel(Base):
     strongest_signal_ids: Mapped[list] = mapped_column(JSON, default=list)
     data_quality_gap_index: Mapped[float] = mapped_column(Float, default=0.0)
     summary_rationale: Mapped[str] = mapped_column(Text, default="")
+    score_decomposition: Mapped[dict] = mapped_column(JSON, default=dict)
     generated_at_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 
     __table_args__ = (Index("idx_attention_org_generated", "organization_id", "generated_at_utc"),)

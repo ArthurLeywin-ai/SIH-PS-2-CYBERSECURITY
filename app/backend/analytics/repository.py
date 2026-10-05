@@ -20,6 +20,7 @@ from app.backend.persistence.models import (
     CaseModel,
     ClosureModel,
     EscalationModel,
+    EvidenceProvenanceModel,
     InvestigationModel,
     MonitoringCoverageModel,
     OrganizationModel,
@@ -27,7 +28,7 @@ from app.backend.persistence.models import (
     SubmissionEvidenceFamilyModel,
     SubmissionModel,
 )
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 logger = get_logger("analytics.repository")
@@ -58,20 +59,67 @@ class AnalyticsRepository:
         organization_id: str | UUID,
         submission_id: str | UUID | None = None,
     ) -> EntityPeriodFeatures:
-        """Batch load operational records for an entity and extract normalized features."""
+        """Batch load operational records for an entity and extract normalized features.
+
+        When submission_id is supplied, strictly filters operational records to only those
+        whose lineage is established in evidence_provenance for this submission.
+        """
         org_id = str(organization_id)
         sub_id = str(submission_id) if submission_id else None
 
-        # Alerts
-        stmt_alerts = select(AlertModel).where(AlertModel.organization_id == org_id)
-        alerts = list(self.session.execute(stmt_alerts).scalars().all())
+        has_prov = False
+        prov_subquery = None
+        if sub_id:
+            prov_count_stmt = (
+                select(func.count())
+                .select_from(EvidenceProvenanceModel)
+                .where(
+                    EvidenceProvenanceModel.organization_id == org_id,
+                    EvidenceProvenanceModel.submission_id == sub_id,
+                )
+            )
+            has_prov = (self.session.execute(prov_count_stmt).scalar() or 0) > 0
 
-        # Cases
-        stmt_cases = select(CaseModel).where(CaseModel.organization_id == org_id)
+            if has_prov:
+                prov_subquery = (
+                    select(EvidenceProvenanceModel.canonical_record_id)
+                    .where(
+                        EvidenceProvenanceModel.organization_id == org_id,
+                        EvidenceProvenanceModel.submission_id == sub_id,
+                    )
+                    .scalar_subquery()
+                )
+                stmt_alerts = select(AlertModel).where(
+                    AlertModel.organization_id == org_id,
+                    AlertModel.alert_id.in_(prov_subquery),
+                )
+                stmt_cases = select(CaseModel).where(
+                    CaseModel.organization_id == org_id,
+                    CaseModel.case_id.in_(prov_subquery),
+                )
+                stmt_assets = select(AssetModel).where(
+                    AssetModel.organization_id == org_id,
+                    AssetModel.asset_id.in_(prov_subquery),
+                )
+                stmt_cov = select(MonitoringCoverageModel).where(
+                    MonitoringCoverageModel.organization_id == org_id,
+                    MonitoringCoverageModel.monitoring_coverage_id.in_(prov_subquery),
+                )
+            else:
+                stmt_alerts = select(AlertModel).where(False)
+                stmt_cases = select(CaseModel).where(False)
+                stmt_assets = select(AssetModel).where(False)
+                stmt_cov = select(MonitoringCoverageModel).where(False)
+        else:
+            stmt_alerts = select(AlertModel).where(AlertModel.organization_id == org_id)
+            stmt_cases = select(CaseModel).where(CaseModel.organization_id == org_id)
+            stmt_assets = select(AssetModel).where(AssetModel.organization_id == org_id)
+            stmt_cov = select(MonitoringCoverageModel).where(MonitoringCoverageModel.organization_id == org_id)
+
+        alerts = list(self.session.execute(stmt_alerts).scalars().all())
         cases = list(self.session.execute(stmt_cases).scalars().all())
         case_ids = [str(c.case_id) for c in cases]
 
-        # Case-linked entities
         case_alert_links: list[CaseAlertLinkModel] = []
         investigations: list[InvestigationModel] = []
         escalations: list[EscalationModel] = []
@@ -80,30 +128,47 @@ class AnalyticsRepository:
         closures: list[ClosureModel] = []
 
         if case_ids:
-            # Batch queries using IN clause
-            stmt_links = select(CaseAlertLinkModel).where(CaseAlertLinkModel.case_id.in_(case_ids))
+            if sub_id and has_prov and prov_subquery is not None:
+                stmt_links = select(CaseAlertLinkModel).where(
+                    CaseAlertLinkModel.case_id.in_(case_ids),
+                    CaseAlertLinkModel.case_alert_link_id.in_(prov_subquery),
+                )
+                stmt_inv = select(InvestigationModel).where(
+                    InvestigationModel.case_id.in_(case_ids),
+                    InvestigationModel.investigation_id.in_(prov_subquery),
+                )
+                stmt_esc = select(EscalationModel).where(
+                    EscalationModel.case_id.in_(case_ids),
+                    EscalationModel.escalation_id.in_(prov_subquery),
+                )
+                stmt_act = select(ActionModel).where(
+                    ActionModel.case_id.in_(case_ids),
+                    ActionModel.action_id.in_(prov_subquery),
+                )
+                stmt_res = select(ResolutionModel).where(
+                    ResolutionModel.case_id.in_(case_ids),
+                    ResolutionModel.resolution_id.in_(prov_subquery),
+                )
+                stmt_clo = select(ClosureModel).where(
+                    ClosureModel.case_id.in_(case_ids),
+                    ClosureModel.closure_id.in_(prov_subquery),
+                )
+            else:
+                stmt_links = select(CaseAlertLinkModel).where(CaseAlertLinkModel.case_id.in_(case_ids))
+                stmt_inv = select(InvestigationModel).where(InvestigationModel.case_id.in_(case_ids))
+                stmt_esc = select(EscalationModel).where(EscalationModel.case_id.in_(case_ids))
+                stmt_act = select(ActionModel).where(ActionModel.case_id.in_(case_ids))
+                stmt_res = select(ResolutionModel).where(ResolutionModel.case_id.in_(case_ids))
+                stmt_clo = select(ClosureModel).where(ClosureModel.case_id.in_(case_ids))
+
             case_alert_links = list(self.session.execute(stmt_links).scalars().all())
-
-            stmt_inv = select(InvestigationModel).where(InvestigationModel.case_id.in_(case_ids))
             investigations = list(self.session.execute(stmt_inv).scalars().all())
-
-            stmt_esc = select(EscalationModel).where(EscalationModel.case_id.in_(case_ids))
             escalations = list(self.session.execute(stmt_esc).scalars().all())
-
-            stmt_act = select(ActionModel).where(ActionModel.case_id.in_(case_ids))
             actions = list(self.session.execute(stmt_act).scalars().all())
-
-            stmt_res = select(ResolutionModel).where(ResolutionModel.case_id.in_(case_ids))
             resolutions = list(self.session.execute(stmt_res).scalars().all())
-
-            stmt_clo = select(ClosureModel).where(ClosureModel.case_id.in_(case_ids))
             closures = list(self.session.execute(stmt_clo).scalars().all())
 
-        # Assets & Coverage
-        stmt_assets = select(AssetModel).where(AssetModel.organization_id == org_id)
         assets = list(self.session.execute(stmt_assets).scalars().all())
-
-        stmt_cov = select(MonitoringCoverageModel).where(MonitoringCoverageModel.organization_id == org_id)
         coverage = list(self.session.execute(stmt_cov).scalars().all())
 
         # Declared Families (filtered by submission if supplied, else entity submissions)
@@ -142,7 +207,11 @@ class AnalyticsRepository:
         peer_features: list[EntityPeriodFeatures] = []
         for org in all_orgs:
             if str(org.organization_id) != exclude_org_id:
-                feat = self.get_entity_features(org.organization_id)
+                hist = self.get_historical_submissions(org.organization_id)
+                if hist:
+                    feat = self.get_entity_features(org.organization_id, hist[-1].submission_id)
+                else:
+                    feat = self.get_entity_features(org.organization_id)
                 peer_features.append(feat)
         return peer_features
 
@@ -201,6 +270,7 @@ class AnalyticsRepository:
             strongest_signal_ids=[s.signal_id for s in summary.strongest_signals],
             data_quality_gap_index=summary.data_quality_gap_index,
             summary_rationale=summary.summary_rationale,
+            score_decomposition=summary.score_decomposition,
             generated_at_utc=summary.generated_at_utc,
         )
         self.session.add(model)

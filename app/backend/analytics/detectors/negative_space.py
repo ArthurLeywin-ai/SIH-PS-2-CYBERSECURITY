@@ -5,11 +5,11 @@ Identifies meaningful absence or missing expected evidence patterns (ARCHITECTUR
 - Declared record counts inconsistent with actual submitted records
 - Critical assets declared without active monitoring coverage
 - Cautious, objective phrasing strictly adhered to
+- All signals contain explicit operational evidence references
 """
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 
 from app.backend.analytics.evidence import EvidenceResolver
@@ -21,6 +21,7 @@ from app.backend.analytics.models import (
     SignalSeverity,
     SignalType,
     SupervisorySignal,
+    generate_deterministic_signal_id,
 )
 
 
@@ -65,9 +66,31 @@ class NegativeSpaceDetector:
                 observed_state="0 investigation records present while cases exist",
                 context_details=f"{features.case_count} cases submitted",
             )
+            affected_cases = [str(c.case_id) for c in features.cases]
+            refs = [
+                self.resolver.build_reference(
+                    record_id=cid,
+                    evidence_family="cases",
+                    role=EvidenceRole.MISSING_EXPECTATION,
+                    description=f"Case {cid} lacks investigation counterpart.",
+                )
+                for cid in affected_cases[:5]
+            ]
+
+            signal_id = generate_deterministic_signal_id(
+                organization_id=features.organization_id,
+                submission_id=features.submission_id,
+                detector_id=self.DETECTOR_ID,
+                detector_version=self.DETECTOR_VERSION,
+                signal_type=SignalType.NEGATIVE_SPACE.value,
+                finding_key="missing_family_investigations",
+                affected_record_ids=sorted(affected_cases),
+                basis_identity=f"cases:{features.case_count}",
+            )
+
             signals.append(
                 SupervisorySignal(
-                    signal_id=str(uuid.uuid4()),
+                    signal_id=signal_id,
                     organization_id=features.organization_id,
                     submission_id=features.submission_id,
                     signal_type=SignalType.NEGATIVE_SPACE,
@@ -83,16 +106,8 @@ class NegativeSpaceDetector:
                     observed_value=0,
                     expected_value=f">= 1 (for {features.case_count} cases)",
                     confidence=0.92,
-                    evidence_references=[
-                        self.resolver.build_reference(
-                            record_id=str(c.case_id),
-                            evidence_family="cases",
-                            role=EvidenceRole.MISSING_EXPECTATION,
-                            description=f"Case {c.case_id} lacks investigation counterpart.",
-                        )
-                        for c in features.cases[:5]
-                    ],
-                    affected_record_ids=[str(c.case_id) for c in features.cases],
+                    evidence_references=refs,
+                    affected_record_ids=sorted(affected_cases),
                     detector_id=self.DETECTOR_ID,
                     detector_version=self.DETECTOR_VERSION,
                     investigation_questions=questions,
@@ -108,9 +123,31 @@ class NegativeSpaceDetector:
                 observed_state="0 monitoring coverage records provided",
                 context_details=f"{features.asset_count} assets declared in asset inventory",
             )
+            affected_assets = [str(a.asset_id) for a in features.assets]
+            refs = [
+                self.resolver.build_reference(
+                    record_id=aid,
+                    evidence_family="assets",
+                    role=EvidenceRole.MISSING_EXPECTATION,
+                    description=f"Asset {aid} has no monitoring coverage declaration.",
+                )
+                for aid in affected_assets[:5]
+            ]
+
+            signal_id = generate_deterministic_signal_id(
+                organization_id=features.organization_id,
+                submission_id=features.submission_id,
+                detector_id=self.DETECTOR_ID,
+                detector_version=self.DETECTOR_VERSION,
+                signal_type=SignalType.NEGATIVE_SPACE.value,
+                finding_key="missing_family_monitoring_coverage",
+                affected_record_ids=sorted(affected_assets),
+                basis_identity=f"assets:{features.asset_count}",
+            )
+
             signals.append(
                 SupervisorySignal(
-                    signal_id=str(uuid.uuid4()),
+                    signal_id=signal_id,
                     organization_id=features.organization_id,
                     submission_id=features.submission_id,
                     signal_type=SignalType.NEGATIVE_SPACE,
@@ -126,16 +163,8 @@ class NegativeSpaceDetector:
                     observed_value=0,
                     expected_value=f">= 1 (for {features.asset_count} assets)",
                     confidence=0.88,
-                    evidence_references=[
-                        self.resolver.build_reference(
-                            record_id=str(a.asset_id),
-                            evidence_family="assets",
-                            role=EvidenceRole.MISSING_EXPECTATION,
-                            description=f"Asset {a.asset_id} has no monitoring coverage declaration.",
-                        )
-                        for a in features.assets[:5]
-                    ],
-                    affected_record_ids=[str(a.asset_id) for a in features.assets],
+                    evidence_references=refs,
+                    affected_record_ids=sorted(affected_assets),
                     detector_id=self.DETECTOR_ID,
                     detector_version=self.DETECTOR_VERSION,
                     investigation_questions=questions,
@@ -153,9 +182,29 @@ class NegativeSpaceDetector:
                     expected_rule="Submissions are expected to include foundational asset inventory and telemetry.",
                     observed_state=f"No {missing_core} records were declared or observed in the submission",
                 )
+                scope_id = features.submission_id or features.organization_id
+                scope_fam = "submissions" if features.submission_id else "organizations"
+                ref = self.resolver.build_reference(
+                    record_id=scope_id,
+                    evidence_family=scope_fam,
+                    role=EvidenceRole.MISSING_EXPECTATION,
+                    description=f"Scope missing foundational {missing_core} evidence family.",
+                )
+
+                signal_id = generate_deterministic_signal_id(
+                    organization_id=features.organization_id,
+                    submission_id=features.submission_id,
+                    detector_id=self.DETECTOR_ID,
+                    detector_version=self.DETECTOR_VERSION,
+                    signal_type=SignalType.NEGATIVE_SPACE.value,
+                    finding_key=f"missing_core_family_{missing_core}",
+                    affected_record_ids=[scope_id],
+                    basis_identity=f"missing_core:{missing_core}",
+                )
+
                 signals.append(
                     SupervisorySignal(
-                        signal_id=str(uuid.uuid4()),
+                        signal_id=signal_id,
                         organization_id=features.organization_id,
                         submission_id=features.submission_id,
                         signal_type=SignalType.NEGATIVE_SPACE,
@@ -167,6 +216,8 @@ class NegativeSpaceDetector:
                         observed_value=0,
                         expected_value=">= 1",
                         confidence=0.95,
+                        evidence_references=[ref],
+                        affected_record_ids=[scope_id],
                         detector_id=self.DETECTOR_ID,
                         detector_version=self.DETECTOR_VERSION,
                         investigation_questions=questions,
@@ -179,6 +230,8 @@ class NegativeSpaceDetector:
     def _check_declared_vs_actual_counts(self, features: EntityPeriodFeatures) -> list[SupervisorySignal]:
         signals: list[SupervisorySignal] = []
 
+        fam_map = {f.evidence_family: f for f in features.declared_families}
+
         for family, declared in features.declared_family_counts.items():
             actual = features.actual_family_counts.get(family, 0)
             if declared != actual and declared > 0:
@@ -187,9 +240,70 @@ class NegativeSpaceDetector:
                     expected_rule="Submission declaration specifies expected record count.",
                     observed_state=f"Declared {declared} records, but {actual} actual records were observed",
                 )
+
+                refs: list[EvidenceReference] = []
+                affected_ids: list[str] = []
+
+                # Reference the declaration record
+                fam_model = fam_map.get(family)
+                if fam_model:
+                    decl_id = str(fam_model.submission_family_id)
+                    affected_ids.append(decl_id)
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=decl_id,
+                            evidence_family="submission_evidence_families",
+                            role=EvidenceRole.SUPPORTING,
+                            description=f"Manifest declaration specifies {declared} expected records for {family}.",
+                        )
+                    )
+
+                # Reference sample of actual records if present, or missing expectation if 0
+                if actual > 0:
+                    records_sample: list[str] = []
+                    if family == "alerts":
+                        records_sample = [str(a.alert_id) for a in features.alerts[:5]]
+                    elif family == "cases":
+                        records_sample = [str(c.case_id) for c in features.cases[:5]]
+                    elif family == "assets":
+                        records_sample = [str(a.asset_id) for a in features.assets[:5]]
+                    elif family == "investigations":
+                        records_sample = [str(i.investigation_id) for i in features.investigations[:5]]
+
+                    for rid in records_sample:
+                        affected_ids.append(rid)
+                        refs.append(
+                            self.resolver.build_reference(
+                                record_id=rid,
+                                evidence_family=family,
+                                role=EvidenceRole.TRIGGER,
+                                description=f"Actual {family} record observed in submission.",
+                            )
+                        )
+                elif fam_model:
+                    refs.append(
+                        self.resolver.build_reference(
+                            record_id=str(fam_model.submission_family_id),
+                            evidence_family="submission_evidence_families",
+                            role=EvidenceRole.MISSING_EXPECTATION,
+                            description=f"Zero actual records observed for declared {family} family.",
+                        )
+                    )
+
+                signal_id = generate_deterministic_signal_id(
+                    organization_id=features.organization_id,
+                    submission_id=features.submission_id,
+                    detector_id=self.DETECTOR_ID,
+                    detector_version=self.DETECTOR_VERSION,
+                    signal_type=SignalType.NEGATIVE_SPACE.value,
+                    finding_key=f"count_discrepancy_{family}",
+                    affected_record_ids=sorted(affected_ids),
+                    basis_identity=f"{family}:{declared}:{actual}",
+                )
+
                 signals.append(
                     SupervisorySignal(
-                        signal_id=str(uuid.uuid4()),
+                        signal_id=signal_id,
                         organization_id=features.organization_id,
                         submission_id=features.submission_id,
                         signal_type=SignalType.NEGATIVE_SPACE,
@@ -206,8 +320,8 @@ class NegativeSpaceDetector:
                         observed_value=actual,
                         expected_value=declared,
                         confidence=0.98,
-                        evidence_references=[],
-                        affected_record_ids=[],
+                        evidence_references=refs,
+                        affected_record_ids=sorted(affected_ids),
                         detector_id=self.DETECTOR_ID,
                         detector_version=self.DETECTOR_VERSION,
                         investigation_questions=questions,
@@ -241,8 +355,19 @@ class NegativeSpaceDetector:
             for aid in sorted(unmonitored)[:10]
         ]
 
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.NEGATIVE_SPACE.value,
+            finding_key="unmonitored_critical_assets",
+            affected_record_ids=sorted(unmonitored),
+            basis_identity=f"unmonitored:{len(unmonitored)}:{total_crit}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.NEGATIVE_SPACE,

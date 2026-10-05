@@ -352,6 +352,7 @@ class SupervisoryAttentionSummaryResponse(BaseAPISchema):
     strongest_signal_ids: list[str] = Field(default_factory=list)
     data_quality_gap_index: float
     summary_rationale: str
+    score_decomposition: dict[str, float] = Field(default_factory=dict)
     generated_at_utc: datetime
 
 

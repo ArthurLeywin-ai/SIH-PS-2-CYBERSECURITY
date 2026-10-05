@@ -10,7 +10,6 @@ Detects discrepancies where expected operational workflow progression differs fr
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,6 +22,7 @@ from app.backend.analytics.models import (
     SignalSeverity,
     SignalType,
     SupervisorySignal,
+    generate_deterministic_signal_id,
 )
 
 
@@ -99,8 +99,19 @@ class ExecutionGapDetector:
                 )
             )
 
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.EXECUTION_GAP.value,
+            finding_key="unlinked_critical_alerts",
+            affected_record_ids=sorted(unlinked),
+            basis_identity=f"unlinked:{len(unlinked)}:{total_crit}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.EXECUTION_GAP,
@@ -112,7 +123,9 @@ class ExecutionGapDetector:
                 "unlinked_count": len(unlinked),
                 "total_high_critical_alerts": total_crit,
                 "unlinked_ratio": round(len(unlinked) / total_crit, 4) if total_crit > 0 else 0.0,
-                "threshold_rule": "High and critical alerts require documented case progression or formal closure.",
+                "threshold_rule": (
+                    "Configured analytical expectation: high/critical alerts require documented case progression."
+                ),
             },
             observed_value=len(unlinked),
             expected_value=0,
@@ -157,8 +170,19 @@ class ExecutionGapDetector:
                 )
             )
 
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.EXECUTION_GAP.value,
+            finding_key="cases_missing_investigation",
+            affected_record_ids=sorted(cases_without_inv),
+            basis_identity=f"missing_inv:{len(cases_without_inv)}:{features.case_count}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.EXECUTION_GAP,
@@ -218,8 +242,19 @@ class ExecutionGapDetector:
             "Were resolution details stored in a ticketing system outside this regulatory submission?",
         ]
 
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.EXECUTION_GAP.value,
+            finding_key="unsupported_closure",
+            affected_record_ids=sorted(unsupported),
+            basis_identity=f"unsupported:{len(unsupported)}:{features.case_count}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.EXECUTION_GAP,
@@ -267,9 +302,9 @@ class ExecutionGapDetector:
         short = f"{len(flagged)} high/critical cases observed without documented escalation or containment action."
         detailed = (
             f"Operational evidence review revealed that {len(flagged)} high-severity cases do not contain "
-            f"corresponding escalation records or corrective action records. Established incident management "
-            f"standards call for formal response actions or documented supervisory escalation on severe "
-            f"security events."
+            f"corresponding escalation records or corrective action records. Under configured analytical "
+            f"expectations, high-severity incidents are expected to include documented escalation or containment "
+            f"actions. The submitted operational evidence does not show this progression."
         )
         questions = [
             (
@@ -279,8 +314,19 @@ class ExecutionGapDetector:
             "Was senior management or the incident response team notified via out-of-band communication?",
         ]
 
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.EXECUTION_GAP.value,
+            finding_key="severe_cases_without_escalation_or_action",
+            affected_record_ids=sorted(flagged),
+            basis_identity=f"unactioned:{len(flagged)}:{features.case_count}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.EXECUTION_GAP,
@@ -351,8 +397,19 @@ class ExecutionGapDetector:
             "Were case closure dates entered retrospectively without automated system validation?",
         ]
 
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.EXECUTION_GAP.value,
+            finding_key="temporal_inversion",
+            affected_record_ids=sorted(affected_ids),
+            basis_identity=f"inversions:{len(inversions)}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.EXECUTION_GAP,

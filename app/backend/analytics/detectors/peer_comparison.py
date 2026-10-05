@@ -1,15 +1,15 @@
 """Peer Comparison Analytics Detector.
 
 Implements cohort-based supervisory comparisons against matched peer entities (ARCHITECTURE.md §11):
-- Peer cohorts grouped by canonical organization attributes: scale_band, operating_model, entity_criticality_band
+- Peer cohorts strictly grouped by canonical organization attributes: scale_band and operating_model
 - Strict guardrails: minimum cohort size enforced to prevent misleading signals from small samples
-- Compares normalized operational rates (coverage rate, closure rate, investigation rate)
+- NO silent fallback to scale-only or entity-wide comparison (ARCHITECTURE.md §11.3)
+- Compares normalized operational rates (coverage rate, closure rate)
 - Records cohort definition, population size, subject value, peer median, and deviation
 """
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 
 from app.backend.analytics.evidence import EvidenceResolver
@@ -25,6 +25,7 @@ from app.backend.analytics.models import (
     SignalSeverity,
     SignalType,
     SupervisorySignal,
+    generate_deterministic_signal_id,
 )
 from app.backend.persistence.models import OrganizationModel
 
@@ -57,7 +58,7 @@ class PeerComparisonDetector:
             # Enforce guardrail: insufficient peers -> produce no misleading signal (ARCHITECTURE.md §11.3)
             return []
 
-        # 1. Filter peer features to matched cohort
+        # 1. Filter peer features to matched exact cohort (scale_band + operating_model)
         org_map = {str(o.organization_id): o for o in (all_organizations or [])}
         cohort_features: list[EntityPeriodFeatures] = []
 
@@ -71,17 +72,7 @@ class PeerComparisonDetector:
             if peer_org and peer_org.scale_band == scale and peer_org.operating_model == op_model:
                 cohort_features.append(pf)
 
-        # Fallback to scale_band only if specific slice has insufficient entities
-        if len(cohort_features) < self.min_cohort_size:
-            cohort_features = [
-                pf
-                for pf in peer_features
-                if pf.organization_id != features.organization_id
-                and org_map.get(pf.organization_id)
-                and org_map[pf.organization_id].scale_band == scale
-            ]
-
-        # Guardrail check
+        # Strict guardrail: NO silent fallback to scale-only or all entities
         if len(cohort_features) < self.min_cohort_size:
             return []
 
@@ -154,7 +145,48 @@ class PeerComparisonDetector:
             deviation=f"{deviation:+.1%}" if "rate" in metric_name else f"{deviation:+.2f}",
         )
 
-        refs: list[EvidenceReference] = [
+        # Subject evidence references (TRIGGER)
+        subject_refs: list[EvidenceReference] = []
+        affected_ids: list[str] = []
+
+        if "coverage" in metric_name:
+            if features.assets:
+                for a in features.assets[:5]:
+                    aid = str(a.asset_id)
+                    affected_ids.append(aid)
+                    subject_refs.append(
+                        self.resolver.build_reference(
+                            record_id=aid,
+                            evidence_family="assets",
+                            role=EvidenceRole.TRIGGER,
+                            description=f"Subject asset {aid} contributing to coverage rate {subject_val:.1%}",
+                        )
+                    )
+            elif features.submission_id:
+                affected_ids.append(features.submission_id)
+                subject_refs.append(
+                    self.resolver.build_reference(
+                        record_id=features.submission_id,
+                        evidence_family="submissions",
+                        role=EvidenceRole.TRIGGER,
+                        description=f"Subject submission reporting {metric_name} {subject_val:.1%}",
+                    )
+                )
+        elif "closure" in metric_name and features.cases:
+            for c in features.cases[:5]:
+                    cid = str(c.case_id)
+                    affected_ids.append(cid)
+                    subject_refs.append(
+                        self.resolver.build_reference(
+                            record_id=cid,
+                            evidence_family="cases",
+                            role=EvidenceRole.TRIGGER,
+                            description=f"Subject case {cid} contributing to closure rate {subject_val:.1%}",
+                        )
+                    )
+
+        # Peer cohort references (PEER_MEMBER)
+        peer_refs: list[EvidenceReference] = [
             self.resolver.build_reference(
                 record_id=pf.organization_id,
                 evidence_family="organizations",
@@ -164,8 +196,21 @@ class PeerComparisonDetector:
             for pf in cohort[:5]
         ]
 
+        all_refs = subject_refs + peer_refs
+
+        signal_id = generate_deterministic_signal_id(
+            organization_id=features.organization_id,
+            submission_id=features.submission_id,
+            detector_id=self.DETECTOR_ID,
+            detector_version=self.DETECTOR_VERSION,
+            signal_type=SignalType.PEER_DEVIATION.value,
+            finding_key=f"peer_deviation_{metric_name}",
+            affected_record_ids=affected_ids,
+            basis_identity=f"{metric_name}:{subject_val:.4f}:{peer_med:.4f}",
+        )
+
         return SupervisorySignal(
-            signal_id=str(uuid.uuid4()),
+            signal_id=signal_id,
             organization_id=features.organization_id,
             submission_id=features.submission_id,
             signal_type=SignalType.PEER_DEVIATION,
@@ -186,8 +231,8 @@ class PeerComparisonDetector:
             observed_value=round(subject_val, 4),
             expected_value=round(peer_med, 4),
             confidence=0.85,
-            evidence_references=refs,
-            affected_record_ids=[],
+            evidence_references=all_refs,
+            affected_record_ids=affected_ids,
             detector_id=self.DETECTOR_ID,
             detector_version=self.DETECTOR_VERSION,
             investigation_questions=questions,

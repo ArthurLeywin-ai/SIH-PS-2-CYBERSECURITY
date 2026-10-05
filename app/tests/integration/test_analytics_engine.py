@@ -71,18 +71,35 @@ def test_analytics_engine_end_to_end_and_determinism(
     assert len(run1.signals) == len(run2.signals)
 
     for s1, s2 in zip(run1.signals, run2.signals, strict=True):
+        assert s1.signal_id == s2.signal_id
         assert s1.signal_type == s2.signal_type
         assert s1.severity == s2.severity
         assert s1.title == s2.title
+        assert s1.short_rationale == s2.short_rationale
+        assert s1.detailed_explanation == s2.detailed_explanation
+        assert s1.basis == s2.basis
         assert s1.observed_value == s2.observed_value
         assert s1.expected_value == s2.expected_value
+        assert s1.confidence == s2.confidence
+        assert [r.to_dict() for r in s1.evidence_references] == [r.to_dict() for r in s2.evidence_references]
         assert s1.affected_record_ids == s2.affected_record_ids
+        assert s1.detector_id == s2.detector_id
+        assert s1.detector_version == s2.detector_version
         assert s1.investigation_questions == s2.investigation_questions
 
     if run1.attention_summary and run2.attention_summary:
+        assert run1.attention_summary.summary_id == run2.attention_summary.summary_id
         assert run1.attention_summary.attention_score == run2.attention_summary.attention_score
         assert run1.attention_summary.attention_band == run2.attention_summary.attention_band
         assert run1.attention_summary.total_signals == run2.attention_summary.total_signals
+        assert run1.attention_summary.signals_by_type == run2.attention_summary.signals_by_type
+        assert run1.attention_summary.signals_by_severity == run2.attention_summary.signals_by_severity
+        assert run1.attention_summary.score_decomposition == run2.attention_summary.score_decomposition
+        assert run1.attention_summary.data_quality_gap_index == run2.attention_summary.data_quality_gap_index
+        assert run1.attention_summary.summary_rationale == run2.attention_summary.summary_rationale
+        assert [s.signal_id for s in run1.attention_summary.strongest_signals] == [
+            s.signal_id for s in run2.attention_summary.strongest_signals
+        ]
 
     # 4. Test REST API: POST /api/v1/analytics/run (persist=True)
     api_run_resp = client.post(
