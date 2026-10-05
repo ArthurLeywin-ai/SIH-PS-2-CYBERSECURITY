@@ -795,3 +795,91 @@ def test_test_d_family_specific_provenance_filtering_with_colliding_ids(test_db_
     )
     assert [c.case_id for c in feat_b.cases] == [colliding_id]
 
+
+def test_single_submission_unresolved_provenance_not_assigned_fallback(test_db_session):
+    """Prove that an operational record without dates/mapping is NOT assigned to an entity's only submission."""
+    from app.backend.ingestion.normalizer import EvidenceNormalizer
+
+    org_id = "org-single-sub-test"
+    sub_id = "sub-single-only"
+
+    _seed_org_and_submission(
+        test_db_session,
+        org_id,
+        sub_id,
+        start_dt=datetime(2026, 1, 1, tzinfo=UTC),
+        end_dt=datetime(2026, 1, 31, tzinfo=UTC),
+    )
+
+    # Organization has exactly ONE submission
+    normalizer = EvidenceNormalizer(
+        submissions=[
+            {
+                "submission_id": sub_id,
+                "organization_id": org_id,
+                "reporting_period_start_at_utc": "2026-01-01T00:00:00Z",
+                "reporting_period_end_at_utc": "2026-01-31T23:59:59Z",
+            }
+        ]
+    )
+
+    # Operational record has:
+    # - no explicit submission_id
+    # - no usable case_id mapping
+    # - no timestamp/effective date that can establish submission membership
+    raw_dateless_alert = {
+        "alert_id": "alt-dateless-1",
+        "organization_id": org_id,
+        "asset_id": "ast-dateless-1",
+        "severity": "HIGH",
+        "status": "NEW",
+        "disposition": "OPEN",
+        "alert_category": "AUTHENTICATION",
+        "summary": "Alert without dates or submission linkage",
+    }
+
+    norm_alert = normalizer._normalize_alerts(raw_dateless_alert, "operational.json", 1)
+
+    # 1. Assert provenance.submission_id is None
+    prov_records = [p for p in normalizer.provenance_records if p.canonical_record_id == "alt-dateless-1"]
+    assert len(prov_records) >= 1
+    for p in prov_records:
+        assert p.submission_id is None, (
+            f"Record without dates must have provenance.submission_id=None, but got {p.submission_id}!"
+        )
+
+    # Seed asset and dateless alert + provenance (submission_id=None) into database
+    test_db_session.add(
+        AssetModel(
+            asset_id="ast-dateless-1",
+            organization_id=org_id,
+            asset_class="SERVER",
+            criticality="TIER_1",
+            operating_status="ACTIVE",
+            effective_start_at_utc=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+    )
+    test_db_session.add(norm_alert)
+    test_db_session.add(
+        EvidenceProvenanceModel(
+            provenance_id="prov-alt-dateless-1",
+            canonical_record_id="alt-dateless-1",
+            evidence_family="alerts",
+            organization_id=org_id,
+            submission_id=None,  # Unresolved provenance
+            source_file="operational.json",
+            source_record_locator="row:1",
+            source_field="alert_id",
+            canonical_field="alert_id",
+        )
+    )
+    test_db_session.commit()
+
+    # 2. Assert the record does NOT appear in submission-scoped analytics
+    repo = AnalyticsRepository(test_db_session)
+    scoped_features = repo.get_entity_features(org_id, sub_id)
+    assert not any(a.alert_id == "alt-dateless-1" for a in scoped_features.alerts), (
+        "Unresolved dateless alert must NOT appear in submission-scoped features despite single submission!"
+    )
+
+

@@ -91,7 +91,7 @@ class EvidenceNormalizer:
             # Timestamp does not match ANY submission reporting period -> unresolved
             return None
 
-        # For static inventory/coverage records with effective dates:
+        # 4. Deterministic effective-date match for applicable inventory/static records
         eff_dt = self._parse_datetime(
             raw.get("effective_start_at_utc")
             or raw.get("coverage_start_at_utc")
@@ -111,12 +111,7 @@ class EvidenceNormalizer:
             if len(matching_subs) == 1:
                 return str(matching_subs[0].get("submission_id"))
 
-        # When exactly one submission exists and record has no timestamps at all,
-        # it unambiguously belongs to that submission package
-        if len(org_subs) == 1 and not rec_dt and not eff_dt:
-            return str(org_subs[0].get("submission_id"))
-
-        # 4. Unresolved when multiple submissions or no match -> None
+        # 5. Otherwise: unresolved -> None
         return None
 
     @staticmethod
