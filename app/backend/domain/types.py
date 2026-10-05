@@ -1,0 +1,221 @@
+"""Authoritative types and enumerations for the SAT-SA application domain.
+
+Derived strictly from DATA_SCHEMA.md.
+"""
+
+from __future__ import annotations
+
+import enum
+
+
+class ValueState(enum.StrEnum):
+    """Controlled missing-value states per DATA_SCHEMA.md §4.1."""
+
+    OBSERVED_VALUE = "OBSERVED_VALUE"
+    POPULATED = "OBSERVED_VALUE"
+    OBSERVED_ZERO = "OBSERVED_ZERO"
+    NOT_PROVIDED = "NOT_PROVIDED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    INVALID = "INVALID"
+    NO_SUBMITTED_EVIDENCE = "NO_SUBMITTED_EVIDENCE"
+    UNKNOWN = "UNKNOWN"
+
+
+class IngestionStatus(enum.StrEnum):
+    """Lifecycle status of an evidence package ingestion."""
+
+    DISCOVERED = "DISCOVERED"
+    VALIDATING = "VALIDATING"
+    NORMALIZING = "NORMALIZING"
+    INGESTING = "INGESTING"
+    INGESTED = "INGESTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class ValidationSeverity(enum.StrEnum):
+    """Severity of validation issues encountered during ingestion."""
+
+    BLOCKING = "BLOCKING"
+    ERROR = "ERROR"
+    HIGH = "HIGH"
+    WARNING = "WARNING"
+    INFO = "INFO"
+
+
+class ScaleBand(enum.StrEnum):
+    SMALL = "SMALL"
+    MEDIUM = "MEDIUM"
+    LARGE = "LARGE"
+    VERY_LARGE = "VERY_LARGE"
+    UNKNOWN = "UNKNOWN"
+
+
+class OperatingModel(enum.StrEnum):
+    CENTRALIZED_24X7 = "CENTRALIZED_24X7"
+    CENTRALIZED_BUSINESS_HOURS = "CENTRALIZED_BUSINESS_HOURS"
+    DISTRIBUTED = "DISTRIBUTED"
+    HYBRID = "HYBRID"
+    UNKNOWN = "UNKNOWN"
+
+
+class EntityCriticalityBand(enum.StrEnum):
+    STANDARD = "STANDARD"
+    ELEVATED = "ELEVATED"
+    HIGH = "HIGH"
+    UNKNOWN = "UNKNOWN"
+
+
+class OrganizationStatus(enum.StrEnum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    UNKNOWN = "UNKNOWN"
+
+
+class PeriodMaturityState(enum.StrEnum):
+    HISTORICAL_COMPLETE = "HISTORICAL_COMPLETE"
+    RECENT_COMPLETE = "RECENT_COMPLETE"
+    IMMATURE = "IMMATURE"
+    PARTIAL = "PARTIAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class PresenceState(enum.StrEnum):
+    PROVIDED = "PROVIDED"
+    PROVIDED_EMPTY = "PROVIDED_EMPTY"
+    NOT_PROVIDED = "NOT_PROVIDED"
+    PARTIAL = "PARTIAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class AssetClass(enum.StrEnum):
+    SERVER = "SERVER"
+    WORKSTATION = "WORKSTATION"
+    NETWORK_DEVICE = "NETWORK_DEVICE"
+    IDENTITY_DIRECTORY = "IDENTITY_DIRECTORY"
+    CLOUD_RESOURCE = "CLOUD_RESOURCE"
+    DATABASE = "DATABASE"
+    APPLICATION = "APPLICATION"
+    SECURITY_TOOL = "SECURITY_TOOL"
+    UNKNOWN = "UNKNOWN"
+
+
+class AssetCriticality(enum.StrEnum):
+    TIER_0 = "TIER_0"
+    TIER_1 = "TIER_1"
+    TIER_2 = "TIER_2"
+    TIER_3 = "TIER_3"
+    UNKNOWN = "UNKNOWN"
+
+
+class MonitoringCoverageState(enum.StrEnum):
+    COVERED = "COVERED"
+    PARTIAL = "PARTIAL"
+    NOT_COVERED = "NOT_COVERED"
+    UNKNOWN = "UNKNOWN"
+
+
+class AlertCategory(enum.StrEnum):
+    AUTHENTICATION_IDENTITY = "AUTHENTICATION_IDENTITY"
+    ENDPOINT = "ENDPOINT"
+    NETWORK = "NETWORK"
+    APPLICATION = "APPLICATION"
+    DATA_ACCESS = "DATA_ACCESS"
+    MALWARE_LIKE = "MALWARE_LIKE"
+    POLICY_CONTROL = "POLICY_CONTROL"
+    AVAILABILITY = "AVAILABILITY"
+    OTHER_UNKNOWN = "OTHER_UNKNOWN"
+
+
+class AlertSeverity(enum.StrEnum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    INFORMATIONAL = "INFORMATIONAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class AlertStatus(enum.StrEnum):
+    NEW = "NEW"
+    TRIAGED = "TRIAGED"
+    INVESTIGATING = "INVESTIGATING"
+    CONTAINED = "CONTAINED"
+    CLOSED = "CLOSED"
+    SUPPRESSED = "SUPPRESSED"
+    UNKNOWN = "UNKNOWN"
+
+
+class Disposition(enum.StrEnum):
+    TRUE_POSITIVE = "TRUE_POSITIVE"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    BENIGN_POSITIVE = "BENIGN_POSITIVE"
+    SUPPRESSED = "SUPPRESSED"
+    ESCALATED = "ESCALATED"
+    POLICY_VIOLATION = "POLICY_VIOLATION"
+    TEST_ACTIVITY = "TEST_ACTIVITY"
+    UNDETERMINED = "UNDETERMINED"
+    UNKNOWN = "UNKNOWN"
+
+
+class CaseStatus(enum.StrEnum):
+    OPEN = "OPEN"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    PENDING = "PENDING"
+    RESOLVED = "RESOLVED"
+    CLOSED = "CLOSED"
+    REOPENED = "REOPENED"
+    UNKNOWN = "UNKNOWN"
+
+
+class CaseType(enum.StrEnum):
+    SECURITY_INCIDENT = "SECURITY_INCIDENT"
+    POLICY_VIOLATION = "POLICY_VIOLATION"
+    SUSPICIOUS_ACTIVITY = "SUSPICIOUS_ACTIVITY"
+    DATA_LEAK = "DATA_LEAK"
+    ROUTINE_TRIAGE = "ROUTINE_TRIAGE"
+    UNKNOWN = "UNKNOWN"
+
+
+class ActionType(enum.StrEnum):
+    CONTAINMENT = "CONTAINMENT"
+    REMEDIATION = "REMEDIATION"
+    HOST_ISOLATION = "HOST_ISOLATION"
+    CREDENTIAL_RESET = "CREDENTIAL_RESET"
+    FIREWALL_BLOCK = "FIREWALL_BLOCK"
+    POLICY_UPDATE = "POLICY_UPDATE"
+    ACCEPTED_RISK = "ACCEPTED_RISK"
+    OTHER = "OTHER"
+    UNKNOWN = "UNKNOWN"
+
+
+class ActionStatus(enum.StrEnum):
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    VERIFIED = "VERIFIED"
+    CANCELLED = "CANCELLED"
+    DEFERRED = "DEFERRED"
+    ACCEPTED_RISK = "ACCEPTED_RISK"
+    UNKNOWN = "UNKNOWN"
+
+
+class ClosureStatus(enum.StrEnum):
+    RESOLVED = "RESOLVED"
+    AUTO_CLOSED = "AUTO_CLOSED"
+    SUPERSEDED = "SUPERSEDED"
+    SUPPRESSED = "SUPPRESSED"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    ADMINISTRATIVE = "ADMINISTRATIVE"
+    UNKNOWN = "UNKNOWN"
+
+
+class ExceptionStatus(enum.StrEnum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    REJECTED = "REJECTED"
+    SUPERSEDED = "SUPERSEDED"
+    REVOKED = "REVOKED"
+    UNKNOWN = "UNKNOWN"

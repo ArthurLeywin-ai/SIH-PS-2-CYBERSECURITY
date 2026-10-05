@@ -14,4 +14,9 @@ generator/.git-backup/
 **/build/
 **/*.egg-info/
 .kilo/
-
+data/
+evidence/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
