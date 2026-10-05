@@ -73,3 +73,95 @@ def sanitize_filename(filename: str) -> str:
     if ".." in clean or "/" in clean or "\\" in clean:
         raise SecurityError(f"Invalid filename characters in: {filename}")
     return clean
+
+
+def validate_package_safety(
+    package_path: Path | str,
+    base_dir: Path | str | None = None,
+    max_package_size_bytes: int = 500 * 1024 * 1024,
+) -> Path:
+    """Validate package path safety, enforce evidence boundary, and verify package-size limit.
+
+    1. Resolves package path canonical form and validates path traversal against base_dir.
+    2. Ensures symlinks cannot escape the permitted evidence boundary.
+    3. Recursively calculates total file size without loading contents into memory.
+    4. Rejects packages exceeding max_package_size_bytes.
+    """
+    resolved_pkg = validate_path_traversal(package_path, base_dir=base_dir)
+
+    if not resolved_pkg.exists():
+        # Missing package path will be handled by pipeline existence check
+        return resolved_pkg
+
+    if not resolved_pkg.is_dir():
+        return resolved_pkg
+
+    boundary = Path(base_dir).resolve() if base_dir is not None else resolved_pkg
+
+    total_size = 0
+    visited_dirs: set[Path] = set()
+
+    for root, dirs, files in os.walk(resolved_pkg, followlinks=False):
+        current_dir = Path(root).resolve()
+        if current_dir in visited_dirs:
+            continue
+        visited_dirs.add(current_dir)
+
+        # 1. Check directory entries for symlinks escaping boundary
+        for dname in list(dirs):
+            dpath = Path(root) / dname
+            if dpath.is_symlink():
+                resolved_d = dpath.resolve()
+                try:
+                    resolved_d.relative_to(boundary)
+                except ValueError as err:
+                    logger.warning(
+                        "Symlink directory escape detected: '%s' points to '%s' outside '%s'",
+                        dpath,
+                        resolved_d,
+                        boundary,
+                    )
+                    raise SecurityError(
+                        f"Symlink directory '{dname}' escapes permitted evidence boundary: {resolved_d}"
+                    ) from err
+                if resolved_d in visited_dirs:
+                    dirs.remove(dname)
+
+        # 2. Check files for symlinks and calculate total size
+        for fname in files:
+            fpath = Path(root) / fname
+            resolved_f = fpath.resolve()
+            try:
+                resolved_f.relative_to(boundary)
+            except ValueError as err:
+                logger.warning(
+                    "Symlink file escape detected: '%s' points to '%s' outside '%s'",
+                    fpath,
+                    resolved_f,
+                    boundary,
+                )
+                raise SecurityError(
+                    f"Symlink file '{fname}' escapes permitted evidence boundary: {resolved_f}"
+                ) from err
+
+            if resolved_f.is_file():
+                try:
+                    file_size = resolved_f.stat().st_size
+                except OSError as err:
+                    raise SecurityError(f"Cannot stat package file '{fpath}': {err}") from err
+
+                total_size += file_size
+                if total_size > max_package_size_bytes:
+                    logger.warning(
+                        "Package size limit exceeded: total %d bytes > limit %d bytes",
+                        total_size,
+                        max_package_size_bytes,
+                    )
+                    msg = (
+                        f"Package total size ({total_size} bytes) "
+                        f"exceeds configured limit ({max_package_size_bytes} bytes)."
+                    )
+                    raise SecurityError(msg)
+
+    return resolved_pkg
+

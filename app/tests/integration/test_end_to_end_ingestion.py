@@ -10,9 +10,11 @@ Evidence Package (M5 Generator Output)
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
+from app.backend.config import get_config
 from fastapi.testclient import TestClient
 from satsa_generator.fixture.builder import build_fixture, parse_master_seed_hex
 
@@ -35,10 +37,15 @@ def test_end_to_end_package_to_api(client: TestClient, m5_fixture_package: Path)
 
     and retrievable through the REST API with 100% provenance retention.
     """
+    # Stage package into configured evidence directory boundary
+    staged_pkg = get_config().evidence_dir / "m5_fixture"
+    if not staged_pkg.exists():
+        shutil.copytree(m5_fixture_package, staged_pkg)
+
     # 1. Trigger Ingestion via API
     ingest_resp = client.post(
         "/api/v1/packages/ingest",
-        json={"package_path": str(m5_fixture_package), "fail_on_error": False},
+        json={"package_path": str(staged_pkg), "fail_on_error": False},
     )
     assert ingest_resp.status_code == 201, f"Ingestion failed: {ingest_resp.text}"
     pkg_data = ingest_resp.json()

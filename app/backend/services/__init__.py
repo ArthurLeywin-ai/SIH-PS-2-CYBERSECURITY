@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
+from app.backend.config import ApplicationConfig, get_config
 from app.backend.errors import NotFoundError
 from app.backend.ingestion.pipeline import IngestionPipeline, IngestionResult
 from app.backend.persistence.models import IngestionPackageModel
@@ -21,10 +22,15 @@ from sqlalchemy.orm import Session
 class PackageService:
     """Manages package discovery, validation status, and ingestion."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, config: ApplicationConfig | None = None) -> None:
         self.session = session
         self.repo = PackageRepository(session)
-        self.pipeline = IngestionPipeline()
+        cfg = config or get_config()
+        self.pipeline = IngestionPipeline(
+            base_dir=cfg.evidence_dir,
+            max_file_size_bytes=cfg.max_file_size_bytes,
+            max_package_size_bytes=cfg.max_package_size_bytes,
+        )
 
     def ingest(self, package_path: str | Path, fail_on_error: bool = False) -> IngestionResult:
         """Trigger ingestion of an evidence package."""

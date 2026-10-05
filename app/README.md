@@ -138,31 +138,58 @@ Once started in `development` mode, interactive OpenAPI documentation is availab
 
 ---
 
-## 6. Evidence Ingestion
+## 6. Evidence Ingestion & Boundaries
 
-### Option A: Ingest via REST API
+### Supported Evidence Formats
+The ingestion pipeline automatically discovers and ingests operational evidence across all supported formats:
+- **JSON (`.json`)**: Formatted arrays or single-record objects.
+- **JSONL (`.jsonl`)**: Line-delimited JSON objects streaming large volumes safely.
+- **CSV (`.csv`)**: Header-driven comma-separated values with automatic null/whitespace sanitization.
+
+Evidence families are discovered dynamically via canonical names (e.g. `alerts.json`, `alerts.jsonl`, `alerts.csv`) and standard variations without altering canonical domain models.
+
+### Evidence Root Security Boundary
+The application enforces `SATSA_EVIDENCE_DIR` as the strict security boundary for package intake:
+- **Allowed**: Any package directory resolving inside the configured `SATSA_EVIDENCE_DIR`.
+- **Rejected (HTTP 403 / `SECURITY_VIOLATION`)**:
+  - Paths resolving outside `SATSA_EVIDENCE_DIR` (e.g. `/tmp/package`, `/home/user/evidence`).
+  - Path traversal attempts (`../`) escaping the permitted root.
+  - Symlinks escaping the permitted boundary.
+
+External packages must be staged into `SATSA_EVIDENCE_DIR` before submission.
+
+### Package & File Size Limits
+To prevent denial-of-service and memory exhaustion attacks:
+- **Total Package Maximum (`SATSA_MAX_PACKAGE_SIZE`)**: The pipeline recursively calculates total package size before parsing and rejects oversized packages. No partial records remain in storage.
+- **Per-File Maximum (`SATSA_MAX_FILE_SIZE`)**: Every individual evidence file is verified before loading.
+
+### Private Ground Truth Isolation
+The ingestion pipeline strictly enforces ground-truth isolation:
+- `private_ground_truth/` is treated as **generator-only material**.
+- The application **NEVER** reads, ingests, persists, or exposes private ground truth, oracle labels, scenario IDs, or generator metadata.
+- Operational storage (`evidence_provenance`) contains **ONLY** operational evidence provenance tracing to submitted operational evidence files.
+
+### Ingestion Flow:
 ```bash
+# Ingest via REST API
 curl -X POST http://127.0.0.1:8000/api/v1/packages/ingest \
   -H "Content-Type: application/json" \
-  -d '{"package_path": "/path/to/evidence_package", "fail_on_error": false}'
+  -d '{"package_path": "/path/inside/evidence_dir/package", "fail_on_error": false}'
+
+# Ingest headlessly via CLI
+satsa-ingest /path/inside/evidence_dir/package
 ```
 
-### Option B: Headless Ingestion via CLI
-```bash
-satsa-ingest /path/to/evidence_package
-```
-
-### Ingestion Pipeline Flow:
-1. **Security & Path Validation**: Verifies directory traversal safety and boundaries.
-2. **Package Discovery**: Discovers `operational_evidence/` and manifest (`fixture_manifest.json`).
-3. **Manifest Inspection**: Hashes files on disk and compares against declared SHA-256 hashes.
-4. **File Presence Check**: Verifies baseline required evidence files exist.
+1. **Security & Boundary Validation**: Validates canonical path against `SATSA_EVIDENCE_DIR`, verifies symlink confinement, and checks total package byte size against `SATSA_MAX_PACKAGE_SIZE`.
+2. **Package Discovery**: Discovers operational files in package root or `operational_evidence/`.
+3. **Manifest Inspection**: Hashes files on disk and compares against declared SHA-256 hashes if a manifest exists.
+4. **File Presence Check**: Verifies mandatory evidence families exist.
 5. **Schema & Vocabulary Validation**: Validates UUIDs, ISO-8601 timestamps, and controlled vocabularies.
 6. **Referential & Temporal Integrity**: Verifies cross-family references and causal ordering.
-7. **Canonical Normalization**: Maps raw records to canonical models, resolving exact duplicates (`VAL-003: no double counting`) while preserving lineage.
-8. **Provenance Attachment**: Captures file, locator, and field traces in `evidence_provenance`.
+7. **Canonical Normalization**: Maps raw records (.json, .jsonl, .csv) to canonical models, resolving exact duplicates (`VAL-003: no double counting`) while preserving operational lineage.
+8. **Operational Provenance Attachment**: Captures operational file, locator, and field traces in `evidence_provenance`.
 9. **Controlled Value State Recording**: Tracks field states in `canonical_field_observations`.
-10. **Transactional Persistence**: Atomically inserts all records into SQLite.
+10. **Transactional Persistence**: Atomically inserts all records into SQLite. Failed packages leave zero partial operational evidence.
 
 ---
 
@@ -244,9 +271,11 @@ Test breakdown:
 - `app/tests/unit/test_database_persistence.py`: SQLite initialization, repositories, relationships, transaction rollback.
 - `app/tests/unit/test_reader.py`: JSON, JSONL, and CSV streaming with size boundary checks.
 - `app/tests/unit/test_validator.py`: Missing file detection, hash verification, UUID checks, duplicate detection, referential integrity.
-- `app/tests/security/test_security.py`: Path traversal protection, system root access prevention, oversized payload rejection, filename sanitization.
-- `app/tests/integration/test_api_endpoints.py`: Health, readiness, and structured error handling.
+- `app/tests/security/test_security.py`: Path traversal protection, system root access prevention, oversized payload rejection, package safety, symlink escaping, filename sanitization.
+- `app/tests/integration/test_api_endpoints.py`: Health, readiness, boundary violation (403), and structured error handling.
 - `app/tests/integration/test_end_to_end_ingestion.py`: End-to-end pipeline: M5 fixture build → ingestion → validation → normalization → database → API retrieval with provenance verification.
+- `app/tests/integration/test_remediation_blockers.py`: Regression verification for M6 remediation blockers: Ground Truth Isolation (Test 1), Evidence-Root Boundary Enforcement (Test 2), Package Size Enforcement & Transactional Safety (Test 3), Format Contract for JSON, JSONL, and CSV (Test 4).
+
 
 ---
 

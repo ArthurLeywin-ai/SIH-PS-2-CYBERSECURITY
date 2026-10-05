@@ -114,6 +114,24 @@ class EvidenceNormalizer:
     # ---------------------------------------------------------------------------
 
     @staticmethod
+    def _to_int(val: Any, default: int = 0) -> int:
+        if val is None or val == "":
+            return default
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return default
+
+    @staticmethod
+    def _to_float(val: Any, default: float = 0.0) -> float:
+        if val is None or val == "":
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
+    @staticmethod
     def _parse_datetime(val: Any) -> datetime | None:
         if isinstance(val, datetime):
             return val
@@ -226,13 +244,13 @@ class EvidenceNormalizer:
             scale_band=raw.get("scale_band", "MEDIUM"),
             operating_model=raw.get("operating_model", "HYBRID"),
             entity_criticality_band=raw.get("entity_criticality_band", "STANDARD"),
-            asset_count_declared=int(raw.get("asset_count_declared", 0)),
-            critical_asset_count_declared=int(raw.get("critical_asset_count_declared", 0)),
+            asset_count_declared=self._to_int(raw.get("asset_count_declared"), 0),
+            critical_asset_count_declared=self._to_int(raw.get("critical_asset_count_declared"), 0),
             default_timezone=raw.get("default_timezone", "UTC"),
             profile_effective_start_at_utc=self._parse_datetime(raw.get("profile_effective_start_at_utc"))
             or datetime.now(UTC),
             profile_effective_end_at_utc=self._parse_datetime(raw.get("profile_effective_end_at_utc")),
-            profile_version=int(raw.get("profile_version", 1)),
+            profile_version=self._to_int(raw.get("profile_version"), 1),
             organization_status=raw.get("organization_status", "ACTIVE"),
         )
 
@@ -317,7 +335,7 @@ class EvidenceNormalizer:
             submission_id=sub_id,
             evidence_family=raw.get("evidence_family", "UNKNOWN"),
             presence_state=raw.get("presence_state", "PRESENT"),
-            declared_record_count=int(raw.get("declared_record_count", 0)),
+            declared_record_count=self._to_int(raw.get("declared_record_count"), 0),
         )
 
     def _normalize_control_process_references(
@@ -394,7 +412,7 @@ class EvidenceNormalizer:
             asset_id=asset_id,
             monitoring_type=raw.get("monitoring_type") or raw.get("coverage_source_type", "EDR"),
             coverage_state=raw.get("coverage_state") or raw.get("coverage_quality_state", "COVERED"),
-            coverage_percentage=float(raw.get("coverage_percentage", 100.0)),
+            coverage_percentage=self._to_float(raw.get("coverage_percentage"), 100.0),
             effective_start_at_utc=self._parse_datetime(
                 raw.get("coverage_start_at_utc") or raw.get("effective_start_at_utc")
             )

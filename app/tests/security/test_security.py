@@ -71,3 +71,66 @@ def test_sanitize_filename():
     assert sanitize_filename("safe_export.csv") == "safe_export.csv"
     with pytest.raises(SecurityError):
         sanitize_filename("path/traversal..escape.json")
+
+
+def test_package_safety_outside_boundary(tmp_path: Path):
+    from app.backend.security import validate_package_safety
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    outside = tmp_path / "outside_pkg"
+    outside.mkdir()
+
+    with pytest.raises(SecurityError) as exc_info:
+        validate_package_safety(outside, base_dir=base_dir)
+    assert "outside permitted root" in str(exc_info.value)
+
+
+def test_package_safety_symlink_escape(tmp_path: Path):
+    from app.backend.security import validate_package_safety
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    pkg_dir = base_dir / "pkg"
+    pkg_dir.mkdir()
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("classified")
+
+    evil_link = pkg_dir / "evil_symlink.json"
+    evil_link.symlink_to(secret)
+
+    with pytest.raises(SecurityError) as exc_info:
+        validate_package_safety(pkg_dir, base_dir=base_dir)
+    assert "escapes permitted evidence boundary" in str(exc_info.value)
+
+
+def test_package_safety_oversized_total(tmp_path: Path):
+    from app.backend.security import validate_package_safety
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    pkg_dir = base_dir / "pkg"
+    pkg_dir.mkdir()
+
+    (pkg_dir / "f1.json").write_bytes(b"A" * 600)
+    (pkg_dir / "f2.json").write_bytes(b"B" * 600)
+
+    # 1200 bytes total > 1000 limit
+    with pytest.raises(SecurityError) as exc_info:
+        validate_package_safety(pkg_dir, base_dir=base_dir, max_package_size_bytes=1000)
+    assert "exceeds configured limit" in str(exc_info.value)
+
+
+def test_package_safety_under_limit_success(tmp_path: Path):
+    from app.backend.security import validate_package_safety
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    pkg_dir = base_dir / "pkg"
+    pkg_dir.mkdir()
+
+    (pkg_dir / "f1.json").write_bytes(b"A" * 100)
+    res = validate_package_safety(pkg_dir, base_dir=base_dir, max_package_size_bytes=1000)
+    assert res == pkg_dir.resolve()
+

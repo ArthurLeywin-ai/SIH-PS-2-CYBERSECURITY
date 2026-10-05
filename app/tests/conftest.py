@@ -75,11 +75,19 @@ def client(test_db_engine: Engine, tmp_path: Path) -> Generator[TestClient, None
 
     app.dependency_overrides[get_db] = override_get_db
 
-    # Create temporary evidence directory
-    ev_dir = tmp_path / "evidence_storage"
+    # Configure temporary evidence directory as boundary
+    from app.backend.config import get_config
+
+    ev_dir = (tmp_path / "evidence_storage").resolve()
     ev_dir.mkdir(parents=True, exist_ok=True)
+    cfg = get_config()
+    old_evidence_dir = cfg.evidence_dir
+    cfg.evidence_dir = ev_dir
 
-    with TestClient(app) as test_client:
-        yield test_client
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        cfg.evidence_dir = old_evidence_dir
+        app.dependency_overrides.clear()
 
-    app.dependency_overrides.clear()

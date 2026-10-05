@@ -46,8 +46,13 @@ def ingest() -> None:
         sys.exit(1)
 
     init_db(get_engine())
+    cfg = get_config()
     with get_db_session() as session:
-        pipeline = IngestionPipeline()
+        pipeline = IngestionPipeline(
+            base_dir=cfg.evidence_dir,
+            max_file_size_bytes=cfg.max_file_size_bytes,
+            max_package_size_bytes=cfg.max_package_size_bytes,
+        )
         try:
             res = pipeline.run(target_path, db_session=session, fail_on_error=args.fail_on_error)
             logger.info("Ingestion complete. Status: %s. Records: %s", res.status, res.record_counts)

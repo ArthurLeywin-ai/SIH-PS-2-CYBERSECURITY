@@ -33,10 +33,26 @@ def test_api_not_found_error_structure(client: TestClient):
 
 
 def test_api_invalid_ingest_path(client: TestClient):
+    from app.backend.config import get_config
+
+    # Inside configured root, but nonexistent -> 422
+    target = get_config().evidence_dir / "nonexistent_inside_root"
     resp = client.post(
         "/api/v1/packages/ingest",
-        json={"package_path": "/nonexistent/path/to/evidence", "fail_on_error": True},
+        json={"package_path": str(target), "fail_on_error": True},
     )
     assert resp.status_code == 422
     data = resp.json()
     assert data["error_code"] == "INVALID_EVIDENCE_PACKAGE"
+
+
+def test_api_ingest_boundary_violation(client: TestClient):
+    # Outside configured root -> 403 Forbidden
+    resp = client.post(
+        "/api/v1/packages/ingest",
+        json={"package_path": "/tmp/forbidden_outside_root", "fail_on_error": True},
+    )
+    assert resp.status_code == 403
+    data = resp.json()
+    assert data["error_code"] == "SECURITY_VIOLATION"
+

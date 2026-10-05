@@ -15,17 +15,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.backend.config import get_config
 from app.backend.domain.types import IngestionStatus, ValidationSeverity
 from app.backend.errors import (
     InvalidPackageError,
     PackageValidationFailureError,
+    SecurityViolationError,
 )
 from app.backend.ingestion.normalizer import EvidenceNormalizer
 from app.backend.ingestion.reader import EvidenceFileReader
 from app.backend.logging import get_logger
 from app.backend.persistence.database import get_db_session
 from app.backend.persistence.models import (
-    EvidenceProvenanceModel,
     IngestionPackageModel,
 )
 from app.backend.persistence.repositories import (
@@ -35,7 +36,7 @@ from app.backend.persistence.repositories import (
     ProvenanceRepository,
     SubmissionRepository,
 )
-from app.backend.security import validate_path_traversal
+from app.backend.security import SecurityError, validate_package_safety
 from app.backend.validation.validator import (
     ALL_EVIDENCE_FAMILIES,
     EvidencePackageValidator,
@@ -63,13 +64,43 @@ class IngestionResult:
 class IngestionPipeline:
     """Production ingestion pipeline for SAT-SA evidence packages."""
 
+    FAMILY_FILE_CANDIDATES: dict[str, list[str]] = {
+        "organizations": ["organizations", "organization"],
+        "submissions": ["submissions", "submission"],
+        "submission_manifests": ["submission_manifests", "submission_manifest", "manifests", "manifest"],
+        "submission_evidence_families": [
+            "submission_evidence_families",
+            "submission_evidence_family",
+            "submission_families",
+            "submission_family",
+        ],
+        "control_process_references": ["control_process_references", "control_process_reference"],
+        "control_process_subject_links": ["control_process_subject_links", "control_process_subject_link"],
+        "assets": ["assets", "asset"],
+        "monitoring_coverage": ["monitoring_coverage", "coverage"],
+        "alerts": ["alerts", "alert"],
+        "cases": ["cases", "case"],
+        "case_alert_links": ["case_alert_links", "case_alert_link"],
+        "investigations": ["investigations", "investigation"],
+        "escalations": ["escalations", "escalation"],
+        "actions": ["actions", "action"],
+        "resolutions": ["resolutions", "resolution"],
+        "closures": ["closures", "closure"],
+        "exceptions": ["exceptions", "exception"],
+        "process_changes": ["process_changes", "process_change"],
+    }
+
     def __init__(
         self,
         base_dir: Path | None = None,
-        max_file_size_bytes: int = 100 * 1024 * 1024,
+        max_file_size_bytes: int | None = None,
+        max_package_size_bytes: int | None = None,
     ) -> None:
-        self.base_dir = base_dir
-        self.reader = EvidenceFileReader(max_file_size_bytes=max_file_size_bytes)
+        cfg = get_config()
+        self.base_dir = base_dir if base_dir is not None else cfg.evidence_dir
+        self.max_file_size_bytes = max_file_size_bytes or cfg.max_file_size_bytes
+        self.max_package_size_bytes = max_package_size_bytes or cfg.max_package_size_bytes
+        self.reader = EvidenceFileReader(max_file_size_bytes=self.max_file_size_bytes)
         self.validator = EvidencePackageValidator()
 
     def run(
@@ -82,11 +113,22 @@ class IngestionPipeline:
         start_time = time.perf_counter()
         pkg_path = Path(package_input)
 
-        # 1. Path & Traversal Validation
-        pkg_path = validate_path_traversal(pkg_path, self.base_dir) if self.base_dir else pkg_path.resolve()
+        # 1. Path, Traversal, Symlink, and Package-Size Safety Validation
+        try:
+            pkg_path = validate_package_safety(
+                pkg_path,
+                base_dir=self.base_dir,
+                max_package_size_bytes=self.max_package_size_bytes,
+            )
+        except SecurityError as err:
+            logger.warning("Security violation for package '%s': %s", package_input, err)
+            raise SecurityViolationError(str(err)) from err
 
         if not pkg_path.exists():
             raise InvalidPackageError(f"Evidence package path does not exist: {pkg_path}")
+
+        if not pkg_path.is_dir():
+            raise InvalidPackageError(f"Evidence package path must be a directory: {pkg_path}")
 
         # 2. Package Discovery: locate operational evidence folder
         evidence_dir = pkg_path
@@ -233,10 +275,7 @@ class IngestionPipeline:
                 if family in normalized_by_family:
                     ev_repo.bulk_insert(normalized_by_family[family])
 
-            # Ingest rich ground truth provenance if present in package
-            self._ingest_ground_truth_provenance(pkg_path, prov_repo)
-
-            # Persist generated field observations and provenance
+            # Persist generated field observations and provenance from operational evidence
             prov_repo.bulk_create_provenance(normalizer.provenance_records)
             prov_repo.bulk_create_observations(normalizer.observations)
 
@@ -261,89 +300,57 @@ class IngestionPipeline:
             duration_seconds=duration,
         )
 
+    @staticmethod
+    def _clean_csv_row(row: dict[str, str]) -> dict[str, Any]:
+        """Normalize empty string CSV cells to None for schema consistency."""
+        cleaned: dict[str, Any] = {}
+        for k, v in row.items():
+            if k is None:
+                continue
+            clean_k = k.strip()
+            if v is None:
+                cleaned[clean_k] = None
+            elif isinstance(v, str):
+                clean_v = v.strip()
+                if clean_v == "" or clean_v.upper() in {"NULL", "NONE"}:
+                    cleaned[clean_k] = None
+                else:
+                    cleaned[clean_k] = clean_v
+            else:
+                cleaned[clean_k] = v
+        return cleaned
+
     def _read_all_evidence_files(
         self,
         evidence_dir: Path,
     ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
-        """Read all canonical json files present in evidence directory."""
+        """Discover and read evidence files for all canonical families across .json, .jsonl, and .csv formats."""
         records: dict[str, list[dict[str, Any]]] = {}
         files_map: dict[str, str] = {}
 
         for family in ALL_EVIDENCE_FAMILIES:
-            target_file = evidence_dir / f"{family}.json"
-            if target_file.exists():
-                data = self.reader.read_json(target_file)
-                if isinstance(data, list):
-                    records[family] = data
-                    files_map[family] = target_file.name
-                elif isinstance(data, dict):
-                    records[family] = [data]
-                    files_map[family] = target_file.name
+            candidates = self.FAMILY_FILE_CANDIDATES.get(family, [family])
+            matched = False
+            for base_name in candidates:
+                if matched:
+                    break
+                for ext in (".json", ".jsonl", ".csv"):
+                    target_file = evidence_dir / f"{base_name}{ext}"
+                    if target_file.exists() and target_file.is_file():
+                        if ext == ".json":
+                            data = self.reader.read_json(target_file)
+                            recs = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+                        elif ext == ".jsonl":
+                            recs = [rec for _, rec in self.reader.read_jsonl(target_file)]
+                        elif ext == ".csv":
+                            raw_csv = [rec for _, rec in self.reader.read_csv(target_file)]
+                            recs = [self._clean_csv_row(r) for r in raw_csv]
+                        records[family] = recs
+                        files_map[family] = target_file.name
+                        matched = True
+                        break
 
         return records, files_map
-
-    def _ingest_ground_truth_provenance(self, pkg_path: Path, prov_repo: ProvenanceRepository) -> None:
-        """If package contains private_ground_truth/canonical_reference/*_provenance.json, ingest it."""
-        ref_dir = pkg_path / "private_ground_truth" / "canonical_reference"
-        if not ref_dir.is_dir():
-            return
-
-        for p_file in ref_dir.glob("*_provenance.json"):
-            try:
-                data = self.reader.read_json(p_file)
-                if not isinstance(data, dict):
-                    continue
-                field_provs = data.get("field_provenance", [])
-                rel_provs = data.get("relationship_provenance", [])
-                extra_models: list[EvidenceProvenanceModel] = []
-
-                for item in field_provs:
-                    rec_id = item.get("canonical_record_id")
-                    if not rec_id:
-                        continue
-                    extra_models.append(
-                        EvidenceProvenanceModel(
-                            provenance_id=str(uuid.uuid4()),
-                            canonical_record_id=str(rec_id),
-                            evidence_family="ground_truth_field",
-                            organization_id="UNKNOWN",
-                            submission_id=None,
-                            source_file=item.get("source_file_path", p_file.name),
-                            source_record_locator=item.get("source_record_locator", "unknown"),
-                            source_field=item.get("source_field_name", "unknown"),
-                            raw_source_value=str(item.get("raw_value")) if item.get("raw_value") is not None else None,
-                            canonical_field=item.get("canonical_field_name", "unknown"),
-                            relationship_name=None,
-                            target_canonical_id=None,
-                        )
-                    )
-
-                for item in rel_provs:
-                    subj_id = item.get("canonical_subject_id")
-                    obj_id = item.get("canonical_object_id")
-                    if not subj_id:
-                        continue
-                    extra_models.append(
-                        EvidenceProvenanceModel(
-                            provenance_id=str(uuid.uuid4()),
-                            canonical_record_id=str(subj_id),
-                            evidence_family="ground_truth_relationship",
-                            organization_id="UNKNOWN",
-                            submission_id=None,
-                            source_file=item.get("source_file_path", p_file.name),
-                            source_record_locator=item.get("source_record_locator", "unknown"),
-                            source_field=item.get("source_relationship_field", "unknown"),
-                            raw_source_value=str(obj_id) if obj_id else None,
-                            canonical_field=item.get("relationship_type", "relationship"),
-                            relationship_name=item.get("relationship_type"),
-                            target_canonical_id=str(obj_id) if obj_id else None,
-                        )
-                    )
-
-                prov_repo.bulk_create_provenance(extra_models)
-                logger.info("Ingested %d ground truth provenance records from %s", len(extra_models), p_file.name)
-            except Exception as err:
-                logger.warning("Could not ingest ground truth provenance from %s: %s", p_file.name, err)
 
     def _load_manifest(self, evidence_dir: Path) -> dict[str, Any] | None:
         for name in ["fixture_manifest.json", "manifest.json", "submission_manifest.json"]:
