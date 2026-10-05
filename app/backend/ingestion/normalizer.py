@@ -60,9 +60,11 @@ class EvidenceNormalizer:
 
     def _resolve_submission_id(self, org_id: str, raw: dict[str, Any]) -> str | None:
         """Deterministically determine the submission_id for an operational record."""
+        # 1. Explicit submission_id
         if raw.get("submission_id"):
             return str(raw["submission_id"])
 
+        # 2. Case-derived submission mapping when valid
         case_id = raw.get("case_id")
         if case_id and str(case_id) in self.case_submission_map:
             return self.case_submission_map[str(case_id)]
@@ -70,18 +72,14 @@ class EvidenceNormalizer:
         org_subs = self.submissions_by_org.get(org_id, [])
         if not org_subs:
             return None
-        if len(org_subs) == 1:
-            return str(org_subs[0].get("submission_id"))
 
-        # Multiple submissions for entity: match temporal coverage
+        # 3. Deterministic reporting-period matching
         rec_dt = (
             self._parse_datetime(raw.get("created_at_utc"))
             or self._parse_datetime(raw.get("started_at_utc"))
             or self._parse_datetime(raw.get("escalated_at_utc"))
             or self._parse_datetime(raw.get("resolved_at_utc"))
             or self._parse_datetime(raw.get("closed_at_utc"))
-            or self._parse_datetime(raw.get("effective_start_at_utc"))
-            or self._parse_datetime(raw.get("effective_at_utc"))
             or self._parse_datetime(raw.get("linked_at_utc"))
         )
         if rec_dt:
@@ -90,9 +88,36 @@ class EvidenceNormalizer:
                 s_end = self._parse_datetime(sub.get("reporting_period_end_at_utc"))
                 if s_start and s_end and s_start <= rec_dt <= s_end:
                     return str(sub.get("submission_id"))
+            # Timestamp does not match ANY submission reporting period -> unresolved
+            return None
 
-        # Fallback to first submission if no period matched
-        return str(org_subs[0].get("submission_id"))
+        # For static inventory/coverage records with effective dates:
+        eff_dt = self._parse_datetime(
+            raw.get("effective_start_at_utc")
+            or raw.get("coverage_start_at_utc")
+            or raw.get("effective_at_utc")
+        )
+        if eff_dt:
+            matching_subs = []
+            for sub in org_subs:
+                s_start = self._parse_datetime(sub.get("reporting_period_start_at_utc"))
+                s_end = self._parse_datetime(sub.get("reporting_period_end_at_utc"))
+                if s_start and s_end and eff_dt <= s_end:
+                    eff_end = self._parse_datetime(
+                        raw.get("effective_end_at_utc") or raw.get("coverage_end_at_utc")
+                    )
+                    if eff_end is None or eff_end >= s_start:
+                        matching_subs.append(sub)
+            if len(matching_subs) == 1:
+                return str(matching_subs[0].get("submission_id"))
+
+        # When exactly one submission exists and record has no timestamps at all,
+        # it unambiguously belongs to that submission package
+        if len(org_subs) == 1 and not rec_dt and not eff_dt:
+            return str(org_subs[0].get("submission_id"))
+
+        # 4. Unresolved when multiple submissions or no match -> None
+        return None
 
     @staticmethod
     def _get_pk(family: str, raw: dict[str, Any]) -> str | None:

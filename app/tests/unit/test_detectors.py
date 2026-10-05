@@ -301,7 +301,11 @@ def test_anomaly_detector_low_closure_rate_and_long_duration():
         alert_count=10,
     )
 
-    signals = detector.detect(features, historical_durations=[12.0, 14.0, 16.0, 13.0, 14.0, 15.0])
+    signals = detector.detect(
+        features,
+        historical_closure_rates=[0.75, 0.80, 0.70, 0.85],
+        historical_durations=[12.0, 14.0, 16.0, 13.0, 14.0, 15.0],
+    )
     assert len(signals) >= 2
     types = {s.title for s in signals}
     assert any("Low Case Closure Rate" in t for t in types)

@@ -87,7 +87,7 @@ def _record_provenance(
     source_file: str = "operational.json",
 ):
     prov = EvidenceProvenanceModel(
-        provenance_id=f"prov-{canonical_id}",
+        provenance_id=f"prov-{family}-{canonical_id}",
         canonical_record_id=canonical_id,
         evidence_family=family,
         organization_id=org_id,
@@ -569,3 +569,229 @@ def test_blocker_7_no_invented_policy_language():
         assert "nciipc" not in text
         assert "statutory standard" not in text
         assert "evidentiary standards" not in text
+
+
+def test_test_a_and_b_unresolved_provenance_and_ambiguous_exclusion(test_db_session):
+    """Test A & B: Ambiguous records without valid submission mapping resolve to None and are excluded."""
+    from app.backend.ingestion.normalizer import EvidenceNormalizer
+
+    org_id = "org-ambig-test"
+    sub_1 = "sub-jan-2026"
+    sub_2 = "sub-feb-2026"
+
+    _seed_org_and_submission(
+        test_db_session,
+        org_id,
+        sub_1,
+        start_dt=datetime(2026, 1, 1, tzinfo=UTC),
+        end_dt=datetime(2026, 1, 31, tzinfo=UTC),
+    )
+    _seed_org_and_submission(
+        test_db_session,
+        org_id,
+        sub_2,
+        start_dt=datetime(2026, 2, 1, tzinfo=UTC),
+        end_dt=datetime(2026, 2, 28, tzinfo=UTC),
+    )
+
+    # Initialize EvidenceNormalizer with both submissions
+    normalizer = EvidenceNormalizer(
+        submissions=[
+            {
+                "submission_id": sub_1,
+                "organization_id": org_id,
+                "reporting_period_start_at_utc": "2026-01-01T00:00:00Z",
+                "reporting_period_end_at_utc": "2026-01-31T23:59:59Z",
+            },
+            {
+                "submission_id": sub_2,
+                "organization_id": org_id,
+                "reporting_period_start_at_utc": "2026-02-01T00:00:00Z",
+                "reporting_period_end_at_utc": "2026-02-28T23:59:59Z",
+            },
+        ]
+    )
+
+    # Operational record: Alert with timestamp outside both periods (March 15) and no explicit submission_id
+    raw_ambiguous_alert = {
+        "alert_id": "alt-ambig-1",
+        "organization_id": org_id,
+        "asset_id": "ast-ambig-1",
+        "severity": "HIGH",
+        "status": "NEW",
+        "disposition": "OPEN",
+        "alert_category": "AUTHENTICATION",
+        "summary": "Ambiguous alert outside periods",
+        "created_at_utc": "2026-03-15T12:00:00Z",
+    }
+
+    norm_alert = normalizer._normalize_alerts(raw_ambiguous_alert, "operational.json", 1)
+
+    # Test A: Provenance submission_id MUST be None
+    prov_records = [p for p in normalizer.provenance_records if p.canonical_record_id == "alt-ambig-1"]
+    assert len(prov_records) >= 1
+    for ambig_prov in prov_records:
+        assert ambig_prov.submission_id is None, (
+            f"Ambiguous record must have submission_id=None, got {ambig_prov.submission_id}!"
+        )
+
+    # Seed asset and ambiguous alert + provenance into DB
+    ast_model = AssetModel(
+        asset_id="ast-ambig-1",
+        organization_id=org_id,
+        asset_class="SERVER",
+        criticality="TIER_1",
+        operating_status="ACTIVE",
+        effective_start_at_utc=datetime(2025, 1, 1, tzinfo=UTC),
+    )
+    test_db_session.add(ast_model)
+    test_db_session.add(norm_alert)
+    test_db_session.add(
+        EvidenceProvenanceModel(
+            provenance_id="prov-ambig-1",
+            canonical_record_id="alt-ambig-1",
+            evidence_family="alerts",
+            organization_id=org_id,
+            submission_id=None,  # Unresolved
+            source_file="operational.json",
+            source_record_locator="row:1",
+            source_field="alert_id",
+            canonical_field="alert_id",
+        )
+    )
+    test_db_session.commit()
+
+    # Test B: Prove ambiguous record is NOT included in either submission's scoped feature set
+    repo = AnalyticsRepository(test_db_session)
+    feat_sub1 = repo.get_entity_features(org_id, sub_1)
+    assert not any(a.alert_id == "alt-ambig-1" for a in feat_sub1.alerts), (
+        "Ambiguous alert must NOT appear in Sub-1 scoped feature set!"
+    )
+
+    feat_sub2 = repo.get_entity_features(org_id, sub_2)
+    assert not any(a.alert_id == "alt-ambig-1" for a in feat_sub2.alerts), (
+        "Ambiguous alert must NOT appear in Sub-2 scoped feature set!"
+    )
+
+
+def test_test_c_statistical_anomaly_sample_size_ladder():
+    """Test C: Sample size ladder for closure rate anomalies (n=0,1,2 -> None; n>=3 -> valid MAD signal)."""
+    resolver = EvidenceResolver(session=None)
+    detector = StatisticalAnomalyDetector(resolver)
+
+    features = FeatureExtractor.extract(
+        organization_id="org-test-c",
+        cases=[
+            CaseModel(
+                case_id=f"case-c-{i}",
+                organization_id="org-test-c",
+                status="OPEN",
+                created_at_utc=datetime.now(UTC),
+            )
+            for i in range(10)
+        ],  # 10 cases, 0% closure
+    )
+
+    # Ladder 1: n = 0 (empty or None)
+    sigs_0a = detector.detect(features, historical_closure_rates=None)
+    assert not any("Closure Rate" in s.title for s in sigs_0a)
+
+    sigs_0b = detector.detect(features, historical_closure_rates=[])
+    assert not any("Closure Rate" in s.title for s in sigs_0b)
+
+    # Ladder 2: n = 1
+    sigs_1 = detector.detect(features, historical_closure_rates=[0.80])
+    assert not any("Closure Rate" in s.title for s in sigs_1)
+
+    # Ladder 3: n = 2
+    sigs_2 = detector.detect(features, historical_closure_rates=[0.80, 0.85])
+    assert not any("Closure Rate" in s.title for s in sigs_2)
+
+    # Ladder 4: n = 3 (minimum required sample size reached)
+    sigs_3 = detector.detect(features, historical_closure_rates=[0.80, 0.85, 0.82])
+    closure_sigs_3 = [s for s in sigs_3 if "Closure Rate" in s.title]
+    assert len(closure_sigs_3) == 1
+    sig = closure_sigs_3[0]
+
+    assert sig.signal_type == SignalType.STATISTICAL_ANOMALY
+    assert sig.basis["sample_size"] == 3
+    assert sig.basis["sample_size"] >= 3
+    assert "baseline_reference" in sig.basis
+    assert "threshold" in sig.basis
+    assert "deviation" in sig.basis
+    assert "limitations" in sig.basis
+    assert "HISTORICAL_MEDIAN_MAD" in sig.basis["baseline_method"]
+    assert "CONFIGURED_ANALYTICAL_EXPECTATION" not in sig.basis["baseline_method"]
+
+
+def test_test_d_family_specific_provenance_filtering_with_colliding_ids(test_db_session):
+    """Test D: Intentionally colliding canonical IDs across two families are partitioned by evidence_family."""
+    org_id = "org-coll-test"
+    sub_a = "sub-coll-a"
+    sub_b = "sub-coll-b"
+
+    _seed_org_and_submission(test_db_session, org_id, sub_a)
+    _seed_org_and_submission(test_db_session, org_id, sub_b)
+
+    colliding_id = "collision-1"
+
+    # Asset for foreign key
+    test_db_session.add(
+        AssetModel(
+            asset_id="ast-coll",
+            organization_id=org_id,
+            asset_class="SERVER",
+            criticality="TIER_1",
+            operating_status="ACTIVE",
+            effective_start_at_utc=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+    )
+    _record_provenance(test_db_session, "ast-coll", "assets", org_id, sub_a)
+
+    # Alert in Submission A
+    test_db_session.add(
+        AlertModel(
+            alert_id=colliding_id,
+            organization_id=org_id,
+            asset_id="ast-coll",
+            alert_category="AUTHENTICATION",
+            severity="HIGH",
+            status="NEW",
+            disposition="OPEN",
+            summary="Alert with collision id",
+            created_at_utc=datetime(2026, 1, 10, tzinfo=UTC),
+        )
+    )
+    _record_provenance(test_db_session, colliding_id, "alerts", org_id, sub_a)
+
+    # Case in Submission B
+    test_db_session.add(
+        CaseModel(
+            case_id=colliding_id,
+            organization_id=org_id,
+            case_type="INCIDENT",
+            severity="HIGH",
+            status="OPEN",
+            disposition="OPEN",
+            created_at_utc=datetime(2026, 2, 10, tzinfo=UTC),
+        )
+    )
+    _record_provenance(test_db_session, colliding_id, "cases", org_id, sub_b)
+    test_db_session.commit()
+
+    repo = AnalyticsRepository(test_db_session)
+
+    # Submission A must see ONLY the alert, NOT the case
+    feat_a = repo.get_entity_features(org_id, sub_a)
+    assert [a.alert_id for a in feat_a.alerts] == [colliding_id]
+    assert len(feat_a.cases) == 0, (
+        f"Submission A must have 0 cases, but found {[c.case_id for c in feat_a.cases]}!"
+    )
+
+    # Submission B must see ONLY the case, NOT the alert
+    feat_b = repo.get_entity_features(org_id, sub_b)
+    assert len(feat_b.alerts) == 0, (
+        f"Submission B must have 0 alerts, but found {[a.alert_id for a in feat_b.alerts]}!"
+    )
+    assert [c.case_id for c in feat_b.cases] == [colliding_id]
+

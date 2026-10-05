@@ -68,7 +68,6 @@ class AnalyticsRepository:
         sub_id = str(submission_id) if submission_id else None
 
         has_prov = False
-        prov_subquery = None
         if sub_id:
             prov_count_stmt = (
                 select(func.count())
@@ -80,30 +79,33 @@ class AnalyticsRepository:
             )
             has_prov = (self.session.execute(prov_count_stmt).scalar() or 0) > 0
 
-            if has_prov:
-                prov_subquery = (
+            def _family_subquery(family: str):
+                return (
                     select(EvidenceProvenanceModel.canonical_record_id)
                     .where(
                         EvidenceProvenanceModel.organization_id == org_id,
                         EvidenceProvenanceModel.submission_id == sub_id,
+                        EvidenceProvenanceModel.evidence_family == family,
                     )
                     .scalar_subquery()
                 )
+
+            if has_prov:
                 stmt_alerts = select(AlertModel).where(
                     AlertModel.organization_id == org_id,
-                    AlertModel.alert_id.in_(prov_subquery),
+                    AlertModel.alert_id.in_(_family_subquery("alerts")),
                 )
                 stmt_cases = select(CaseModel).where(
                     CaseModel.organization_id == org_id,
-                    CaseModel.case_id.in_(prov_subquery),
+                    CaseModel.case_id.in_(_family_subquery("cases")),
                 )
                 stmt_assets = select(AssetModel).where(
                     AssetModel.organization_id == org_id,
-                    AssetModel.asset_id.in_(prov_subquery),
+                    AssetModel.asset_id.in_(_family_subquery("assets")),
                 )
                 stmt_cov = select(MonitoringCoverageModel).where(
                     MonitoringCoverageModel.organization_id == org_id,
-                    MonitoringCoverageModel.monitoring_coverage_id.in_(prov_subquery),
+                    MonitoringCoverageModel.monitoring_coverage_id.in_(_family_subquery("monitoring_coverage")),
                 )
             else:
                 stmt_alerts = select(AlertModel).where(False)
@@ -128,30 +130,30 @@ class AnalyticsRepository:
         closures: list[ClosureModel] = []
 
         if case_ids:
-            if sub_id and has_prov and prov_subquery is not None:
+            if sub_id and has_prov:
                 stmt_links = select(CaseAlertLinkModel).where(
                     CaseAlertLinkModel.case_id.in_(case_ids),
-                    CaseAlertLinkModel.case_alert_link_id.in_(prov_subquery),
+                    CaseAlertLinkModel.case_alert_link_id.in_(_family_subquery("case_alert_links")),
                 )
                 stmt_inv = select(InvestigationModel).where(
                     InvestigationModel.case_id.in_(case_ids),
-                    InvestigationModel.investigation_id.in_(prov_subquery),
+                    InvestigationModel.investigation_id.in_(_family_subquery("investigations")),
                 )
                 stmt_esc = select(EscalationModel).where(
                     EscalationModel.case_id.in_(case_ids),
-                    EscalationModel.escalation_id.in_(prov_subquery),
+                    EscalationModel.escalation_id.in_(_family_subquery("escalations")),
                 )
                 stmt_act = select(ActionModel).where(
                     ActionModel.case_id.in_(case_ids),
-                    ActionModel.action_id.in_(prov_subquery),
+                    ActionModel.action_id.in_(_family_subquery("actions")),
                 )
                 stmt_res = select(ResolutionModel).where(
                     ResolutionModel.case_id.in_(case_ids),
-                    ResolutionModel.resolution_id.in_(prov_subquery),
+                    ResolutionModel.resolution_id.in_(_family_subquery("resolutions")),
                 )
                 stmt_clo = select(ClosureModel).where(
                     ClosureModel.case_id.in_(case_ids),
-                    ClosureModel.closure_id.in_(prov_subquery),
+                    ClosureModel.closure_id.in_(_family_subquery("closures")),
                 )
             else:
                 stmt_links = select(CaseAlertLinkModel).where(CaseAlertLinkModel.case_id.in_(case_ids))

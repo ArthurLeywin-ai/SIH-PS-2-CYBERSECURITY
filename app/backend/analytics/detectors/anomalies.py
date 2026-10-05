@@ -87,20 +87,16 @@ class StatisticalAnomalyDetector:
         if features.case_count < self.min_cases:
             return None
 
-        current_rate = features.case_closure_rate
+        # Defensible statistical baseline requires historical sample size >= 3
+        if not historical_closure_rates or len(historical_closure_rates) < 3:
+            return None
 
-        # Baseline: historical median with MAD or configured reference benchmark
-        if historical_closure_rates and len(historical_closure_rates) >= 3:
-            baseline = compute_median(historical_closure_rates)
-            mad = compute_mad(historical_closure_rates)
-            threshold = max(0.20, baseline - 2.0 * mad)
-            method = f"HISTORICAL_MEDIAN_MAD (n={len(historical_closure_rates)})"
-            sample_size = len(historical_closure_rates)
-        else:
-            baseline = self.default_closure_rate
-            threshold = 0.30
-            method = "CONFIGURED_ANALYTICAL_EXPECTATION"
-            sample_size = 1
+        current_rate = features.case_closure_rate
+        baseline = compute_median(historical_closure_rates)
+        mad = compute_mad(historical_closure_rates)
+        threshold = max(0.20, baseline - 2.0 * mad)
+        sample_size = len(historical_closure_rates)
+        method = f"HISTORICAL_MEDIAN_MAD (n={sample_size})"
 
         if current_rate < threshold:
             deviation = round(current_rate - baseline, 4)
@@ -155,7 +151,10 @@ class StatisticalAnomalyDetector:
                     "deviation": deviation,
                     "baseline_method": method,
                     "sample_size": sample_size,
-                    "limitations": f"Requires minimum sample of >= {self.min_cases} cases in reporting period",
+                    "limitations": (
+                        f"Requires historical baseline with sample size >= 3 (observed n={sample_size}); "
+                        f"minimum current cases >= {self.min_cases}"
+                    ),
                     "case_count": features.case_count,
                     "closed_case_count": features.closed_case_count,
                 },
@@ -247,9 +246,12 @@ class StatisticalAnomalyDetector:
                 "metric": "investigation_duration_hours",
                 "outlier_count": len(outlier_invs),
                 "sample_size": len(all_durs),
+                "threshold": round(threshold, 2),
                 "threshold_hours": round(threshold, 2),
+                "baseline_reference": round(med, 2),
                 "median_hours": round(med, 2),
                 "mad_hours": round(mad, 2),
+                "deviation": deviation,
                 "max_duration_hours": max_dur,
                 "baseline_method": "IQR_MAD_THRESHOLD",
                 "limitations": f"Requires minimum sample of >= {self.min_investigations} completed investigations",
@@ -332,6 +334,7 @@ class StatisticalAnomalyDetector:
                 basis={
                     "metric": "alert_density_per_asset",
                     "observed_density": round(density, 2),
+                    "baseline_reference": round(med_density, 2),
                     "baseline_median": round(med_density, 2),
                     "baseline_mad": round(mad_density, 2),
                     "threshold": round(threshold, 2),
