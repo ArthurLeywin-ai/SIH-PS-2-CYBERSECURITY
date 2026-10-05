@@ -6,6 +6,7 @@ Guarantees stable, deterministic API contracts without leaking raw database obje
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -299,3 +300,73 @@ class CanonicalFieldObservationResponse(BaseAPISchema):
     raw_value: str | None = None
     normalized_value: str | None = None
     quality_issue: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# M7 Supervisory Analytics Schemas
+# ---------------------------------------------------------------------------
+
+
+class EvidenceReferenceResponse(BaseAPISchema):
+    reference_id: str
+    canonical_record_id: str
+    evidence_family: str
+    organization_id: str
+    submission_id: str | None = None
+    role: str
+    source_file: str | None = None
+    source_record_locator: str | None = None
+    description: str | None = None
+
+
+class SupervisorySignalResponse(BaseAPISchema):
+    signal_id: str
+    organization_id: str
+    submission_id: str | None = None
+    signal_type: str
+    severity: str
+    title: str
+    short_rationale: str
+    detailed_explanation: str
+    basis: dict[str, Any] = Field(default_factory=dict)
+    observed_value: Any = None
+    expected_value: Any = None
+    confidence: float
+    evidence_references: list[dict[str, Any]] = Field(default_factory=list)
+    affected_record_ids: list[str] = Field(default_factory=list)
+    detector_id: str
+    detector_version: str
+    investigation_questions: list[str] = Field(default_factory=list)
+    generated_at_utc: datetime
+
+
+class SupervisoryAttentionSummaryResponse(BaseAPISchema):
+    summary_id: str
+    organization_id: str
+    submission_id: str | None = None
+    total_signals: int
+    signals_by_type: dict[str, int] = Field(default_factory=dict)
+    signals_by_severity: dict[str, int] = Field(default_factory=dict)
+    attention_score: float
+    attention_band: str
+    strongest_signal_ids: list[str] = Field(default_factory=list)
+    data_quality_gap_index: float
+    summary_rationale: str
+    generated_at_utc: datetime
+
+
+class AnalyticsRunRequest(BaseAPISchema):
+    organization_id: str | None = None
+    submission_id: str | None = None
+    persist: bool = True
+
+
+class AnalyticsRunResponse(BaseAPISchema):
+    organization_id: str
+    submission_id: str | None = None
+    signals_count: int
+    signals: list[SupervisorySignalResponse] = Field(default_factory=list)
+    attention_summary: SupervisoryAttentionSummaryResponse | None = None
+    execution_duration_ms: float
+    generated_at_utc: datetime
+

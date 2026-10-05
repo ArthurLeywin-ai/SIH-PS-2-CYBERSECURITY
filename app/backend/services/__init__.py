@@ -146,3 +146,52 @@ class ProvenanceService:
 
     def get_observations(self, canonical_record_id: str | UUID):
         return self.repo.get_observations_by_record_id(canonical_record_id)
+
+
+class AnalyticsService:
+    """Manages supervisory analytics, detector execution, signals, and attention indicators."""
+
+    def __init__(self, session: Session) -> None:
+        from app.backend.analytics.engine import SupervisoryAnalyticsEngine
+        from app.backend.analytics.repository import AnalyticsRepository
+
+        self.session = session
+        self.engine = SupervisoryAnalyticsEngine(session)
+        self.repo = AnalyticsRepository(session)
+
+    def run_submission_analytics(self, submission_id: str | UUID, persist: bool = True):
+        return self.engine.analyze_submission(str(submission_id), persist=persist)
+
+    def run_organization_analytics(self, organization_id: str | UUID, persist: bool = True):
+        return self.engine.analyze_organization(str(organization_id), persist=persist)
+
+    def list_signals(
+        self,
+        organization_id: str | UUID | None = None,
+        submission_id: str | UUID | None = None,
+        signal_type: str | None = None,
+        severity: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        return self.repo.list_signals(
+            organization_id=str(organization_id) if organization_id else None,
+            submission_id=str(submission_id) if submission_id else None,
+            signal_type=signal_type,
+            severity=severity,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_signal(self, signal_id: str | UUID):
+        signal = self.repo.get_signal(str(signal_id))
+        if not signal:
+            raise NotFoundError(f"Supervisory signal '{signal_id}' not found")
+        return signal
+
+    def get_organization_attention(self, organization_id: str | UUID):
+        summary = self.repo.get_latest_attention_summary(str(organization_id))
+        if not summary:
+            raise NotFoundError(f"No attention summary found for organization '{organization_id}'")
+        return summary
+

@@ -254,48 +254,128 @@ Plus system tables:
 - `ingestion_packages`: Tracking intake status, manifest/tree hashes, record counts, and validation issues.
 - `evidence_provenance`: Exact lineage connecting source files, row locators, and fields to canonical entities.
 - `canonical_field_observations`: Preserving controlled missing value states (`NOT_PROVIDED`, `NOT_APPLICABLE`, `INVALID`, etc.).
+- `supervisory_signals`: Persisted explainable signals flagged by supervisory analytics detectors.
+- `supervisory_attention_summaries`: Aggregated entity-level attention summaries, bands, and data quality gap indexes.
 
 ---
 
-## 9. Testing
+## 9. Supervisory Analytics Engine (Milestone 7)
 
-The test suite covers unit tests, security attack simulations, and a mandatory end-to-end integration test ingesting an actual M5 generator fixture:
+Milestone 7 introduces the deterministic, auditable, explainable supervisory analytics layer that operates directly on canonical operational evidence.
+
+### 9.1 Analytics Architecture
+
+```text
+Canonical Operational Evidence
+              ↓
+Analytics Read/Feature Layer (features.py)
+              ↓
+Deterministic Supervisory Detectors (detectors/)
+  ├── Execution Gap Detector (unlinked alerts, missing investigations, premature closures)
+  ├── Negative Space Detector (missing expected families, count discrepancies, unmonitored assets)
+  ├── Statistical Anomaly Detector (median/MAD, IQR thresholds, duration outliers)
+  ├── Peer Comparison Detector (cohort grouping by scale/operating model, size >= 3)
+  └── Operational Drift Detector (period-over-period drift in volume, closure rate, coverage)
+              ↓
+Supervisory Signals with Evidence References & Lineage (models.py, evidence.py)
+              ↓
+Explainable Supervisory Rationale & Examiner Questions (explanations.py)
+              ↓
+Entity-Level Attention Aggregator & Summaries (detectors/attention.py)
+              ↓
+REST API Endpoints & Examiner Persistence (/api/v1/analytics/*)
+```
+
+### 9.2 The Supervisory Signal Contract
+
+Every generated signal implements a strict typed contract (`SupervisorySignal` dataclass & `SupervisorySignalModel`):
+- `signal_id`: Unique deterministic UUID.
+- `organization_id`: Target entity identifier.
+- `submission_id`: Applicable submission reporting period.
+- `signal_type`: Deterministic category (`EXECUTION_GAP`, `NEGATIVE_SPACE`, `STATISTICAL_ANOMALY`, `PEER_DEVIATION`, `OPERATIONAL_DRIFT`).
+- `severity`: Attention level (`INFORMATIONAL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+- `title`: Concise supervisory title.
+- `short_rationale`: 1-2 sentence executive summary for examiners.
+- `detailed_explanation`: Complete multi-paragraph factual rationale.
+- `basis`: Typed calculation dictionary containing metrics, thresholds, baselines, and deviations.
+- `observed_value` & `expected_value`: Explicit quantitative or categorical comparison points.
+- `confidence`: Calibrated strength indicator [0.0, 1.0].
+- `evidence_references`: Granular links with `record_id`, `evidence_family`, `field_path`, `role`, and source file location.
+- `affected_record_ids`: Explicit primary key list of operational records involved.
+- `detector_id` & `detector_version`: Immutable detector provenance.
+- `investigation_questions`: Actionable questions tailored for human examiners.
+- `generated_at_utc`: Deterministic ISO 8601 UTC timestamp.
+
+### 9.3 Supervisory Semantics & Cautionary Phrasing
+
+The engine strictly adheres to supervisory jurisprudence:
+> **A supervisory signal indicates "requires examiner attention / inquiry", NEVER "wrongdoing proved".**
+> **Absence of evidence is NEVER proof that an action never occurred.**
+
+Explanations are strictly framed with cautious, neutral phrasing:
+- *"No supporting record was observed"*
+- *"Evidence gap detected requiring examiner inquiry"*
+- *"The absence of records in this submission does not constitute conclusive proof that the operational activity did not occur"*
+
+### 9.4 Entity-Level Supervisory Attention Indicator
+
+Rather than an arbitrary "risk score", the engine computes an explainable **Supervisory Attention Indicator** (bounded between `0.0` and `100.0`):
+- **Deterministic formula**: Weighted combination of signal severity base scores, signal diversity, and evidence gap indexes.
+- **Categorical Bands**: `LOW` (0-20), `MODERATE` (21-45), `ELEVATED` (46-70), `HIGH` (71-100).
+- **Fully Decomposable**: Includes breakdown by signal type, severity distribution, top 5 strongest signals, and human-readable summary rationale.
+
+### 9.5 Analytics REST API Endpoints
+
+- `POST /api/v1/analytics/run`: Executes analytics for an organization or submission, returning signals and attention summary. Supports `persist=true`.
+- `GET /api/v1/analytics/signals`: Lists persisted supervisory signals with pagination (`limit`, `offset`) and filtering (`organization_id`, `submission_id`, `signal_type`, `severity`).
+- `GET /api/v1/analytics/signals/{signal_id}`: Retrieves full detail, evidence references, and investigation questions for a specific signal.
+- `GET /api/v1/analytics/organizations/{organization_id}/attention`: Retrieves current attention indicator summary and priority band for an entity.
+
+---
+
+## 10. Testing & Verification
+
+The application test suite covers 73 automated tests verifying all layers:
 
 ```bash
 # Run application test suite
-pytest app/tests -v
+generator/venv/bin/pytest app/tests -v
+
+# Run generator test suite
+generator/venv/bin/pytest generator/tests
+
+# Check code compilation
+generator/venv/bin/python3 -m compileall app
+
+# Check linting and style
+generator/venv/bin/ruff check app
 ```
 
 Test breakdown:
-- `app/tests/unit/test_config_logging.py`: Config defaults, environment overrides, structured JSON logging.
-- `app/tests/unit/test_database_persistence.py`: SQLite initialization, repositories, relationships, transaction rollback.
-- `app/tests/unit/test_reader.py`: JSON, JSONL, and CSV streaming with size boundary checks.
-- `app/tests/unit/test_validator.py`: Missing file detection, hash verification, UUID checks, duplicate detection, referential integrity.
-- `app/tests/security/test_security.py`: Path traversal protection, system root access prevention, oversized payload rejection, package safety, symlink escaping, filename sanitization.
-- `app/tests/integration/test_api_endpoints.py`: Health, readiness, boundary violation (403), and structured error handling.
-- `app/tests/integration/test_end_to_end_ingestion.py`: End-to-end pipeline: M5 fixture build → ingestion → validation → normalization → database → API retrieval with provenance verification.
-- `app/tests/integration/test_remediation_blockers.py`: Regression verification for M6 remediation blockers: Ground Truth Isolation (Test 1), Evidence-Root Boundary Enforcement (Test 2), Package Size Enforcement & Transactional Safety (Test 3), Format Contract for JSON, JSONL, and CSV (Test 4).
-
+- `app/tests/unit/test_analytics_features.py`: Deterministic feature extraction, counts, rates, durations, empty population behavior, and pure statistics utilities (`median`, `MAD`, `IQR`).
+- `app/tests/unit/test_detectors.py`: Comprehensive tests for all 5 detectors + Attention Aggregator, testing clean workflows, unlinked alerts, temporal inversions, missing families, count discrepancies, duration outliers, peer deviation cohorts, drift thresholds, and zero baseline handling.
+- `app/tests/unit/test_analytics_isolation.py`: Verifies zero references or imports of `private_ground_truth`, scenario labels, oracle data, or generator metadata.
+- `app/tests/unit/test_explainability_and_evidence.py`: Verifies signal contract completeness, examiner questions, evidence reference resolution, and lineage enrichment.
+- `app/tests/integration/test_analytics_engine.py`: End-to-end integration test: M5 fixture build → ingestion → analytics run → determinism verification across runs → REST API queries and filters.
+- `app/tests/integration/test_remediation_blockers.py`: Regression verification for M6 remediation blockers: Ground Truth Isolation, Evidence-Root Boundary Enforcement, Package Size Enforcement, and Format Contract.
 
 ---
 
-## 10. Air-Gapped & Offline Verification
+## 11. Air-Gapped & Offline Verification
 
 The application is completely self-contained:
 - Zero external cloud AI or analytics APIs
 - Zero remote database connections
 - Zero telemetry, tracking, or network calls
 - Zero external font, CDN, or stylesheet dependencies
-- All dependencies run entirely in the local Python environment.
+- All statistical evaluations (median, MAD, IQR) implemented natively in Python.
 
 ---
 
-## 11. Milestone 6 Scope Boundary Confirmation
+## 12. Milestone Scope Boundary Confirmation
 
 In strict compliance with project governance:
-- **NO** anomaly detection algorithms or ML models have been implemented in M6.
-- **NO** risk scores or supervisory scores have been invented or computed.
-- **NO** final examiner dashboard or frontend has been created.
-- **NO** fake findings have been injected.
-
-Milestone 6 strictly establishes the production-quality application foundation, database, ingestion pipeline, canonical normalization, provenance retention, and REST API.
+- **NO** machine learning models (Isolation Forest, neural nets, autoencoders) in M7.
+- **NO** frontend dashboards in M7.
+- **NO** private ground truth or scenario oracle access at runtime.
+- **NO** modifications to authoritative specifications or generator code.

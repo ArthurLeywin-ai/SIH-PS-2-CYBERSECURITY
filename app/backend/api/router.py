@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.backend.api.routes import (
+    analytics,
     evidence,
     health,
     ingestion,
@@ -20,3 +21,5 @@ api_v1_router.include_router(organizations.router)
 api_v1_router.include_router(submissions.router)
 api_v1_router.include_router(evidence.router)
 api_v1_router.include_router(provenance.router)
+api_v1_router.include_router(analytics.router)
+

@@ -75,6 +75,9 @@ def get_session_factory() -> sessionmaker[Session]:
 
 def init_db(engine: Engine | None = None) -> None:
     """Deterministically create all database tables if they do not exist."""
+    import app.backend.analytics.models  # noqa: F401
+    import app.backend.persistence.models  # noqa: F401
+
     eng = engine or get_engine()
     logger.info("Initializing database schema...")
     Base.metadata.create_all(bind=eng)

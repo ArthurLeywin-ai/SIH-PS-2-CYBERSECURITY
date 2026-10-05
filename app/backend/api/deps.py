@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.backend.persistence.database import get_db
 from app.backend.services import (
+    AnalyticsService,
     EvidenceService,
     OrganizationService,
     PackageService,
@@ -32,3 +33,8 @@ def get_evidence_service(session: Session = Depends(get_db)) -> EvidenceService:
 
 def get_provenance_service(session: Session = Depends(get_db)) -> ProvenanceService:
     return ProvenanceService(session)
+
+
+def get_analytics_service(session: Session = Depends(get_db)) -> AnalyticsService:
+    return AnalyticsService(session)
+
