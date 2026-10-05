@@ -129,6 +129,27 @@ def test_corruption_vocabulary(
         )
 
 
+def test_corruption_malformed_timestamp(
+    tmp_path: Path, fixture_config_path: Path, master_seed: bytes
+) -> None:
+    """Test - malformed timestamp in rendered source artifact fails parse-back."""
+    result = build_m3_fixture(fixture_config_path, master_seed, output_root=tmp_path)
+    csv_file = result.operational_root / "alert_src-a.csv"
+
+    content = csv_file.read_text(encoding="utf-8")
+    lines = content.split("\n")
+    if len(lines) > 1 and lines[1]:
+        parts = lines[1].split(",")
+        parts[4] = "NOT_A_VALID_TIMESTAMP_2025"
+        lines[1] = ",".join(parts)
+        csv_file.write_text("\n".join(lines), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Parse-back failure"):
+        parse_and_validate(
+            result.operational_root, tmp_path / "canonical_reference", "SRC-A", "alert"
+        )
+
+
 def test_corruption_missing_relationship(
     tmp_path: Path, fixture_config_path: Path, master_seed: bytes
 ) -> None:

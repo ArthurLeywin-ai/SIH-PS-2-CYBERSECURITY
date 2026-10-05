@@ -224,6 +224,11 @@ class AuthorizationEntry(BaseModel):
     expected_canonical_state: str | None = Field(default=None, max_length=64)
     expected_quality_issue: str | None = Field(default=None, max_length=256)
     correlation_group: str | None = Field(default=None, max_length=128)
+    source_profile: str | None = Field(default=None, max_length=64)
+    source_file: str | None = Field(default=None, max_length=128)
+    source_locator: str | None = Field(default=None, max_length=64)
+    source_field: str | None = Field(default=None, max_length=128)
+    target_relationship: str | None = Field(default=None, max_length=64)
 
 
 # ---------------------------------------------------------------------------

@@ -120,3 +120,37 @@ def test_canary_leak_detection():
     assert any("CANARY_TRUTH_" in i.actual for i in issues)
     with pytest.raises(LeakageError):
         ComprehensiveLeakageScanner.assert_no_leakage(canary_payload)
+
+
+def test_leaked_seed_and_private_metadata():
+    """Verify scanner detects leaked master/private seeds, answer keys, and truth metadata."""
+    # 1. Leaked master seed or private seed key
+    leaky_seed_payload = {
+        "alert_id": "123",
+        "master_seed": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    }
+    issues1 = ComprehensiveLeakageScanner.scan_payload(leaky_seed_payload)
+    assert any(i.code == "LEAK_FORBIDDEN_KEY" for i in issues1)
+    with pytest.raises(LeakageError):
+        ComprehensiveLeakageScanner.assert_no_leakage(leaky_seed_payload)
+
+    # 2. Leaked answer key or expected finding
+    leaky_truth_payload = {
+        "alert_id": "123",
+        "answer_key": "FINDING-CONCERNING-01",
+    }
+    issues2 = ComprehensiveLeakageScanner.scan_payload(leaky_truth_payload)
+    assert any(i.code == "LEAK_FORBIDDEN_KEY" for i in issues2)
+    with pytest.raises(LeakageError):
+        ComprehensiveLeakageScanner.assert_no_leakage(leaky_truth_payload)
+
+    # 3. Leaked mutation code / authorization id in free text
+    leaky_text_payload = {
+        "alert_id": "123",
+        "notes": "Corrupted under QUAL-AUTH-1234-abcd per test plan",
+    }
+    issues3 = ComprehensiveLeakageScanner.scan_payload(leaky_text_payload)
+    assert any(i.code == "LEAK_SCENARIO_PATTERN" for i in issues3)
+    with pytest.raises(LeakageError):
+        ComprehensiveLeakageScanner.assert_no_leakage(leaky_text_payload)
+

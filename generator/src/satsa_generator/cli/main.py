@@ -151,11 +151,11 @@ def cmd_freeze_config(args: argparse.Namespace) -> int:
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    """Placeholder for dataset generation — not yet implemented."""
+    """Placeholder for full-scale dataset generation (M6+ benchmark scope)."""
     print(
-        "Dataset generation is not yet implemented.\n"
-        "Current milestone: M1 — Repository, configuration, and seed foundation.\n"
-        "Generation will be available after Milestone 2."
+        "Full dataset generation benchmark is scheduled for Milestone 6+.\n"
+        "Current milestone: M5 — Quality mutations and full validation/leakage layer.\n"
+        "Use 'satsa-gen build-fixture --milestone m5' to generate and validate the M5 fixture."
     )
     return 0
 

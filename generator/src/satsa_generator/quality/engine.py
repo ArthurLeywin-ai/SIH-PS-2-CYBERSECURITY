@@ -18,6 +18,7 @@ from typing import Any
 from satsa_generator.core.errors import GeneratorError
 from satsa_generator.core.types import ValueState
 from satsa_generator.ids.service import IDService
+from satsa_generator.profiles.catalog import get_profile
 from satsa_generator.quality.models import (
     QualityExecutionResult,
     QualityMutationStage,
@@ -64,19 +65,28 @@ class QualityMutationEngine:
         records: dict[str, list[Any]],
         *,
         period_id: str = "P01",
+        source_profile_id: str = "SRC-A",
     ) -> list[QualityPlan]:
-        """Generate a complete, deterministic plan covering all 13 quality mutation types."""
+        """Generate a complete plan covering all 13 quality mutation types with explicit targets."""
         plans: list[QualityPlan] = []
         orgs = records.get("organization", [])
         if not orgs:
             raise QualityEngineError("Cannot plan quality mutations without organization records")
 
         org_id = str(orgs[0].organization_id)
+        prof = get_profile(source_profile_id)
+
+        def _target_loc(family: str, idx: int) -> tuple[str, str]:
+            fmt = prof.get_format(family).lower()
+            fname = f"{family}_{source_profile_id.lower()}.{fmt}"
+            loc = f"row:{idx + 1}" if fmt == "csv" else f"[{idx}]"
+            return fname, loc
 
         # 1. MISSING_FIELD: Alert optional field
         alerts = records.get("alert", [])
         if alerts:
             target_alert = alerts[0]
+            fname, loc = _target_loc("alert", 0)
             plan_id = self._ids.generate("qual_auth", "missing_field", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -87,6 +97,10 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="source_alert_id",
+                    source_field="source_alert_id",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
                     expected_canonical_state=ValueState.NOT_PROVIDED,
                     expected_quality_issue="Optional source ID omitted",
                     expected_eligibility_consequence="Canonical UUID retained",
@@ -98,6 +112,10 @@ class QualityMutationEngine:
         sub_fams = records.get("submission_family", [])
         if sub_fams:
             target_fam = sub_fams[-1]
+            sf_idx = len(sub_fams) - 1
+            _, sf_loc = _target_loc("submission_family", sf_idx)
+            fam_fmt = prof.get_format(target_fam.evidence_family).lower()
+            fam_file = f"{target_fam.evidence_family}_{source_profile_id.lower()}.{fam_fmt}"
             plan_id = self._ids.generate(
                 "qual_auth", "missing_family", str(target_fam.submission_family_id)
             )
@@ -109,6 +127,11 @@ class QualityMutationEngine:
                     target_record_id=str(target_fam.submission_family_id),
                     organization_id=org_id,
                     period_id=period_id,
+                    target_field="presence_state",
+                    source_field="presence_state",
+                    source_profile_id=source_profile_id,
+                    source_file=fam_file,
+                    source_locator=sf_loc,
                     expected_canonical_state=ValueState.NOT_PROVIDED,
                     expected_quality_issue=(
                         f"Family {target_fam.evidence_family} not provided in submission"
@@ -118,10 +141,13 @@ class QualityMutationEngine:
                 )
             )
 
-        # 3. PARTIAL_SUBMISSION: Submission record
+        # 3. PARTIAL_SUBMISSION: Explicitly identified withheld record from submission
         subs = records.get("submission", [])
-        if subs:
+        if subs and alerts:
             target_sub = subs[0]
+            withheld_alert = alerts[-1] if len(alerts) > 7 else alerts[0]
+            withheld_idx = alerts.index(withheld_alert)
+            withheld_file, withheld_loc = _target_loc("alert", withheld_idx)
             plan_id = self._ids.generate("qual_auth", "partial_sub", str(target_sub.submission_id))
             plans.append(
                 QualityPlan(
@@ -131,8 +157,22 @@ class QualityMutationEngine:
                     target_record_id=str(target_sub.submission_id),
                     organization_id=org_id,
                     period_id=period_id,
+                    target_field="reporting_period_end_at_utc",
+                    source_field="alert_id",
+                    source_profile_id=source_profile_id,
+                    source_file=withheld_file,
+                    source_locator=withheld_loc,
+                    parameters={
+                        "withheld_family": "alert",
+                        "withheld_record_id": str(withheld_alert.alert_id),
+                        "withheld_source_file": withheld_file,
+                        "withheld_source_locator": withheld_loc,
+                        "reporting_period_end_truncated": True,
+                    },
                     expected_canonical_state=ValueState.UNKNOWN,
-                    expected_quality_issue="Partial submission coverage period",
+                    expected_quality_issue=(
+                        "Partial submission coverage period and withheld alert record"
+                    ),
                     expected_eligibility_consequence="Reporting scope marked partial",
                     seed_label="quality/partial_submission/v1",
                 )
@@ -141,6 +181,7 @@ class QualityMutationEngine:
         # 4. MALFORMED_VALUE: Priority text or note
         if len(alerts) > 1:
             target_alert = alerts[1]
+            fname, loc = _target_loc("alert", 1)
             plan_id = self._ids.generate("qual_auth", "malformed_val", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -151,6 +192,10 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="severity",
+                    source_field="severity",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
                     parameters={"malformed_value": "MALFORMED_PRIORITY_##%"},
                     expected_canonical_state=ValueState.INVALID,
                     expected_quality_issue="Unparseable raw priority token",
@@ -162,6 +207,7 @@ class QualityMutationEngine:
         # 5. EXACT_DUPLICATE: Duplicate an alert
         if len(alerts) > 2:
             target_alert = alerts[2]
+            fname, loc = _target_loc("alert", 2)
             plan_id = self._ids.generate("qual_auth", "exact_dup", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -171,6 +217,11 @@ class QualityMutationEngine:
                     target_record_id=str(target_alert.alert_id),
                     organization_id=org_id,
                     period_id=period_id,
+                    target_field="alert_id",
+                    source_field="alert_id",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
                     expected_canonical_state=ValueState.OBSERVED_VALUE,
                     expected_quality_issue="Exact duplicate record emitted",
                     expected_eligibility_consequence="Deduplication required in analytical layer",
@@ -181,6 +232,7 @@ class QualityMutationEngine:
         # 6. CONFLICTING_DUPLICATE: Conflicting duplicate alert
         if len(alerts) > 3:
             target_alert = alerts[3]
+            fname, loc = _target_loc("alert", 3)
             plan_id = self._ids.generate("qual_auth", "conflicting_dup", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -190,6 +242,12 @@ class QualityMutationEngine:
                     target_record_id=str(target_alert.alert_id),
                     organization_id=org_id,
                     period_id=period_id,
+                    target_field="severity",
+                    source_field="severity",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
+                    parameters={"conflicting_value": "LOW"},
                     expected_canonical_state=ValueState.INVALID,
                     expected_quality_issue="Conflicting duplicate record with altered severity",
                     expected_eligibility_consequence="Flagged as DUPLICATE_CONFLICTING",
@@ -201,6 +259,7 @@ class QualityMutationEngine:
         links = records.get("case_alert_link", [])
         if links:
             target_link = links[0]
+            fname, loc = _target_loc("case_alert_link", 0)
             plan_id = self._ids.generate(
                 "qual_auth", "broken_rel", str(target_link.case_alert_link_id)
             )
@@ -213,6 +272,11 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_relationship="alert_id",
+                    target_field="alert_id",
+                    source_field="alert_id",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
                     expected_canonical_state=ValueState.NO_SUBMITTED_EVIDENCE,
                     expected_quality_issue="Unresolved alert foreign key",
                     expected_eligibility_consequence="Flagged as BROKEN_RELATIONSHIP",
@@ -224,6 +288,7 @@ class QualityMutationEngine:
         cases = records.get("case", [])
         if cases:
             target_case = cases[0]
+            fname, loc = _target_loc("case", 0)
             plan_id = self._ids.generate("qual_auth", "timestamp_prob", str(target_case.case_id))
             plans.append(
                 QualityPlan(
@@ -234,6 +299,11 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="created_at_utc",
+                    source_field="created_at_utc",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
+                    parameters={"corrupted_timestamp": "2099-01-01T00:00:00Z"},
                     expected_canonical_state=ValueState.INVALID,
                     expected_quality_issue="Impossible future event timestamp",
                     expected_eligibility_consequence="Temporal validation anomaly",
@@ -244,6 +314,7 @@ class QualityMutationEngine:
         # 9. SCHEMA_DRIFT: Alert workflow version drift
         if len(alerts) > 4:
             target_alert = alerts[4]
+            fname, loc = _target_loc("alert", 4)
             plan_id = self._ids.generate("qual_auth", "schema_drift", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -253,7 +324,12 @@ class QualityMutationEngine:
                     target_record_id=str(target_alert.alert_id),
                     organization_id=org_id,
                     period_id=period_id,
-                    target_field="workflow_version",
+                    target_field="workflow_version_v2",
+                    source_field="workflow_version_v2",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
+                    parameters={"drifted_value": "DRIFTED_V2"},
                     expected_canonical_state=ValueState.OBSERVED_VALUE,
                     expected_quality_issue="Workflow schema version drift",
                     expected_eligibility_consequence="Schema evolution tracking required",
@@ -264,6 +340,7 @@ class QualityMutationEngine:
         # 10. VOCABULARY_DRIFT: Priority vocabulary drift
         if len(alerts) > 5:
             target_alert = alerts[5]
+            fname, loc = _target_loc("alert", 5)
             plan_id = self._ids.generate("qual_auth", "vocab_drift", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -274,6 +351,11 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="severity",
+                    source_field="severity",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
+                    parameters={"drifted_token": "DRIFTED_CUSTOM_SEV"},
                     expected_canonical_state=ValueState.UNKNOWN,
                     expected_quality_issue="Unmapped custom vocabulary token",
                     expected_eligibility_consequence="Mapped to UNKNOWN vocabulary warning",
@@ -284,6 +366,7 @@ class QualityMutationEngine:
         # 11. LATE_ARRIVAL: Alert arrives in later submission
         if len(alerts) > 6:
             target_alert = alerts[6]
+            fname, loc = _target_loc("alert", 6)
             plan_id = self._ids.generate("qual_auth", "late_arrival", str(target_alert.alert_id))
             plans.append(
                 QualityPlan(
@@ -294,6 +377,11 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="created_at_utc",
+                    source_field="created_at_utc",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
+                    parameters={"delayed_timestamp": "2099-12-31T23:59:59Z"},
                     expected_canonical_state=ValueState.OBSERVED_VALUE,
                     expected_quality_issue="Event submitted in subsequent reporting submission",
                     expected_eligibility_consequence="Late arrival reconciliation required",
@@ -302,9 +390,9 @@ class QualityMutationEngine:
             )
 
         # 12. COUNT_MISMATCH: Manifest count altered
-        sub_fams = records.get("submission_family", [])
         if sub_fams:
             target_sub_fam = sub_fams[0]
+            fname, loc = _target_loc("submission_family", 0)
             plan_id = self._ids.generate(
                 "qual_auth", "count_mismatch", str(target_sub_fam.submission_family_id)
             )
@@ -317,6 +405,11 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="declared_record_count",
+                    source_field="declared_record_count",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
+                    parameters={"mismatched_count": "99999"},
                     expected_canonical_state=ValueState.INVALID,
                     expected_quality_issue="Submission family declared count mismatch",
                     expected_eligibility_consequence="Submission quality audit warning",
@@ -327,6 +420,7 @@ class QualityMutationEngine:
         # 13. SOURCE_ID_ABSENCE: Case source ID omitted
         if cases:
             target_case = cases[-1]
+            fname, loc = _target_loc("case", len(cases) - 1)
             plan_id = self._ids.generate("qual_auth", "source_id_absence", str(target_case.case_id))
             plans.append(
                 QualityPlan(
@@ -337,6 +431,10 @@ class QualityMutationEngine:
                     organization_id=org_id,
                     period_id=period_id,
                     target_field="case_id",
+                    source_field="case_id",
+                    source_profile_id=source_profile_id,
+                    source_file=fname,
+                    source_locator=loc,
                     expected_canonical_state=ValueState.NOT_PROVIDED,
                     expected_quality_issue="Native source case ID omitted",
                     expected_eligibility_consequence="Canonical UUID used as sole identifier",
@@ -351,12 +449,18 @@ class QualityMutationEngine:
         authorizations: list[AuthorizationEntry] = []
         for plan in plans:
             m_type = MutationType(plan.mutation_type.value)
+            target_record_ids = (
+                (plan.target_record_id, str(plan.parameters.get("withheld_record_id")))
+                if plan.mutation_type == QualityMutationType.PARTIAL_SUBMISSION
+                and plan.parameters.get("withheld_record_id")
+                else (plan.target_record_id,)
+            )
             auth_entry = AuthorizationEntry(
                 authorization_id=plan.plan_id,
                 scenario_id="QUALITY_ENGINE",
                 plan_id=plan.plan_id,
                 realization=RealizationState.CONCERNING,
-                target_record_ids=(plan.target_record_id,),
+                target_record_ids=target_record_ids,
                 target_family=plan.target_family,
                 mutation_type=m_type,
                 expected_semantic_effect=plan.expected_quality_issue
@@ -366,6 +470,10 @@ class QualityMutationEngine:
                 target_field=plan.target_field,
                 expected_canonical_state=plan.expected_canonical_state.value,
                 expected_quality_issue=plan.expected_quality_issue,
+                source_profile=plan.source_profile_id,
+                source_file=plan.source_file,
+                source_locator=plan.source_locator,
+                target_relationship=plan.target_relationship,
             )
             self._ledger.authorize(auth_entry)
             authorizations.append(auth_entry)
@@ -376,10 +484,11 @@ class QualityMutationEngine:
         records: dict[str, list[Any]],
         plans: list[QualityPlan] | None = None,
         source_exports_root: Path | None = None,
+        source_profile_id: str = "SRC-A",
     ) -> QualityExecutionResult:
         """Execute quality mutations with strict 4-stage ordering and unexpected defect checking."""
         if plans is None:
-            plans = self.plan_all_quality_mutations(records)
+            plans = self.plan_all_quality_mutations(records, source_profile_id=source_profile_id)
 
         # Pre-authorize all plans in the ledger first
         auths = self.pre_authorize_plans(plans)

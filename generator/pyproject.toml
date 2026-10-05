@@ -1,18 +1,18 @@
 [build-system]
 requires = ["setuptools>=69.0", "setuptools-scm>=8.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "satsa-generator"
 version = "0.1.0"
 description = "SAT-SA Synthetic Dataset Generator — deterministic, offline, reproducible"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 license = {text = "Proprietary — SIH 2026"}
 readme = "README.md"
 
 dependencies = [
-    "numpy>=1.26,<2.0",
-    "polars>=0.20,<1.0",
+    "numpy>=1.26",
+    "polars>=0.20",
     "pydantic>=2.5,<3.0",
 ]
 

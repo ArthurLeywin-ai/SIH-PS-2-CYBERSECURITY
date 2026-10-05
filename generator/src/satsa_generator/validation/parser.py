@@ -99,51 +99,79 @@ def parse_and_validate(
     # Reconstruct
     family_map = profile.family_mappings.get(evidence_family, {})
 
-    def _is_auth_rel(can_id: Any) -> bool:
+    def _is_auth_rel(
+        can_id: Any,
+        rel_field_name: str | None = None,
+        current_locator: str | None = None,
+    ) -> bool:
         if not ledger:
             return False
         can_id_str = str(can_id)
         for entry in ledger.entries.values():
             t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
             t_fam = getattr(entry, "target_family", "")
+            s_prof = getattr(entry, "source_profile", None)
+            s_file = getattr(entry, "source_file", None)
+            s_loc = getattr(entry, "source_locator", None)
+            t_rel = getattr(entry, "target_relationship", None)
+            s_field = getattr(entry, "source_field", None)
             m_tp = str(getattr(entry, "mutation_type", ""))
             if "." in m_tp:
                 m_tp = m_tp.split(".")[-1]
-            if (
-                t_fam == evidence_family
-                and can_id_str in t_ids
-                and m_tp in ("BROKEN_RELATIONSHIP", "REMOVE_RELATIONSHIP")
-            ):
-                return True
+
+            if t_fam != evidence_family or can_id_str not in t_ids:
+                continue
+
+            if m_tp not in ("BROKEN_RELATIONSHIP", "REMOVE_RELATIONSHIP"):
+                continue
+
+            if not s_prof or s_prof != profile_id:
+                continue
+
+            if not s_file or s_file != source_path.name:
+                continue
+
+            if not s_loc or (current_locator and s_loc != current_locator):
+                continue
+
+            allowed_rels = {r for r in (t_rel, s_field) if r}
+            if not allowed_rels or (rel_field_name and rel_field_name not in allowed_rels):
+                continue
+
+            return True
         return False
 
     for idx, row in enumerate(records):
         locator = f"row:{idx + 1}" if ext == "csv" else f"[{idx}]"
-        canonical_id = locators_to_canonical.get(locator)
-        if not canonical_id:
-            # Resolve candidate canonical ID from row fields
-            candidate_id: UUID | None = None
-            for key in (f"{evidence_family}_id", "id", f"src_{evidence_family}_id"):
-                if key in row and row[key]:
+
+        # Resolve candidate canonical ID from row fields
+        candidate_id: UUID | None = None
+        for key in (f"{evidence_family}_id", "id", f"src_{evidence_family}_id"):
+            if key in row and row[key]:
+                try:
+                    val_str = str(row[key])
+                    cand = UUID(val_str[-36:])
+                    if cand in expected_by_id:
+                        candidate_id = cand
+                        break
+                except Exception:
+                    pass
+        if not candidate_id:
+            for v in row.values():
+                if isinstance(v, str) and len(v) >= 36:
                     try:
-                        val_str = str(row[key])
-                        cand = UUID(val_str[-36:])
+                        cand = UUID(v[-36:])
                         if cand in expected_by_id:
                             candidate_id = cand
                             break
                     except Exception:
                         pass
-            if not candidate_id:
-                for v in row.values():
-                    if isinstance(v, str) and len(v) >= 36:
-                        try:
-                            cand = UUID(v[-36:])
-                            if cand in expected_by_id:
-                                candidate_id = cand
-                                break
-                        except Exception:
-                            pass
 
+        canonical_id = locators_to_canonical.get(locator)
+        if canonical_id and candidate_id and canonical_id != candidate_id:
+            canonical_id = None
+
+        if not canonical_id:
             is_dup_auth = False
             if candidate_id and ledger:
                 cand_str = str(candidate_id)
@@ -330,20 +358,61 @@ def parse_and_validate(
                         t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
                         t_fam = getattr(entry, "target_family", "")
                         t_field = getattr(entry, "target_field", None)
+                        s_field = getattr(entry, "source_field", None)
+                        s_prof = getattr(entry, "source_profile", None)
+                        s_file = getattr(entry, "source_file", None)
+                        s_loc = getattr(entry, "source_locator", None)
                         m_type = str(getattr(entry, "mutation_type", ""))
                         if "." in m_type:
                             m_type = m_type.split(".")[-1]
-                        if t_fam == evidence_family and can_id_str in t_ids:
-                            if t_field is not None and t_field in (can_field, source_name):
-                                is_auth_field = True
-                                break
-                            if (
-                                m_type == "CONFLICTING_DUPLICATE"
-                                and can_field == "severity"
-                                and raw_val == "LOW"
-                            ):
-                                is_auth_field = True
-                                break
+
+                        if t_fam != evidence_family or can_id_str not in t_ids:
+                            continue
+
+                        # Check complete identity dimensions
+                        if not s_prof or s_prof != profile_id:
+                            continue
+                        if not s_file or s_file != source_path.name:
+                            continue
+                        if m_type not in ("EXACT_DUPLICATE", "CONFLICTING_DUPLICATE") and (
+                            not s_loc or s_loc != locator
+                        ):
+                            continue
+
+                        allowed_fields = {f for f in (t_field, s_field) if f}
+                        if not allowed_fields or (
+                            can_field not in allowed_fields and source_name not in allowed_fields
+                        ):
+                            continue
+
+                        # Prove that observed discrepancy is exactly what was authorized
+                        if m_type == "CONFLICTING_DUPLICATE":
+                            if str(raw_val).upper() not in ("LOW", "INFORMATIONAL"):
+                                continue
+                        elif m_type in ("MISSING_FIELD", "SOURCE_ID_ABSENCE"):
+                            if raw_val is not None and raw_val != "" and raw_val != "None":
+                                continue
+                        elif m_type in ("TIMESTAMP_PROBLEM", "LATE_ARRIVAL"):
+                            if "2099" not in str(raw_val) and "P02" not in str(raw_val):
+                                continue
+                        elif m_type == "COUNT_MISMATCH":
+                            if str(raw_val) != "99999":
+                                continue
+                        elif m_type == "SCHEMA_DRIFT":
+                            if "DRIFTED" not in str(raw_val):
+                                continue
+                        elif m_type == "VOCABULARY_DRIFT":
+                            if raw_val not in ("UNKNOWN", "DRIFTED_CUSTOM_SEV"):
+                                continue
+                        elif (
+                            m_type == "MALFORMED_VALUE"
+                            and "MALFORMED" not in str(raw_val)
+                            and raw_val != "UNKNOWN"
+                        ):
+                            continue
+
+                        is_auth_field = True
+                        break
 
                 if not is_auth_field:
                     err_msg = (
@@ -419,7 +488,7 @@ def parse_and_validate(
                         if (
                             profile.id_namespace
                             and not item_str.startswith(f"{profile.id_namespace}-")
-                            and not _is_auth_rel(canonical_id)
+                            and not _is_auth_rel(canonical_id, rel_name, locator)
                         ):
                             err_msg = (
                                 f"Source ID '{item_str}' does not match "
@@ -433,7 +502,7 @@ def parse_and_validate(
                 elif profile.id_namespace:
                     val_str = str(raw_val)
                     if not val_str.startswith(f"{profile.id_namespace}-"):
-                        if not _is_auth_rel(canonical_id):
+                        if not _is_auth_rel(canonical_id, rel_name, locator):
                             err_msg = (
                                 f"Source ID '{val_str}' does not match "
                                 f"expected profile namespace '{profile.id_namespace}'"
@@ -457,14 +526,18 @@ def parse_and_validate(
 
                     raw_set = {str(x) for x in raw_val}
                     exp_set = {str(x) for x in expected_rel}
-                    if raw_set != exp_set and not _is_auth_rel(canonical_id):
+                    if raw_set != exp_set and not _is_auth_rel(canonical_id, rel_name, locator):
                         raise ValueError(f"{pfx}expected {exp_set}, got {raw_set}")
 
-                    if len(raw_val) != len(expected_rel) and not _is_auth_rel(canonical_id):
+                    if len(raw_val) != len(expected_rel) and not _is_auth_rel(
+                        canonical_id, rel_name, locator
+                    ):
                         msg = f"{pfx}expected length {len(expected_rel)}, got {len(raw_val)}"
                         raise ValueError(msg)
                 else:
-                    if str(raw_val) != str(expected_rel) and not _is_auth_rel(canonical_id):
+                    if str(raw_val) != str(expected_rel) and not _is_auth_rel(
+                        canonical_id, rel_name, locator
+                    ):
                         raise ValueError(f"{pfx}expected '{expected_rel}', got '{raw_val}'")
             elif (
                 expected_rel is not None

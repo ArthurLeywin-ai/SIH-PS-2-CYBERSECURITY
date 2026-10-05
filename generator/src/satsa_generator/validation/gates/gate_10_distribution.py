@@ -12,7 +12,9 @@ From GENERATOR_IMPLEMENTATION_PLAN §18.1, §18.2 and DATASET_GENERATION_SPEC §
 
 from __future__ import annotations
 
+import contextlib
 from collections import Counter
+from datetime import datetime
 from typing import Any
 
 from satsa_generator.scenarios.models import RealizationState
@@ -359,7 +361,35 @@ class Gate10DistributionSanity(ValidationGate):
                 )
             )
 
-        # 10. Statistical leakage diagnostic: no single public feature perfectly separates labels
+        # 10. Alert burstiness and spacing
+        self._check_alert_burstiness_and_spacing(alerts, issues)
+
+        # 11. Alert category mix diversity
+        self._check_alert_category_diversity(alerts, issues)
+
+        # 12. Case duration bounds, zero variance, and investigation notes
+        self._check_case_duration_and_notes(cases, closures, investigations, issues)
+
+        # 13. Cross-entity divergence / identical alert distributions
+        self._check_cross_entity_divergence(orgs, alerts, issues)
+
+        # 14. Asset criticality mix
+        self._check_asset_criticality_mix(assets, issues)
+
+        # 15. Mutation prevalence bounds
+        self._check_mutation_prevalence_bounds(context.receipts, records, issues)
+
+        # 16. Workflow rates and valid denominators
+        self._check_workflow_rates(
+            cases,
+            escalations,
+            records.get("action", []),
+            records.get("resolution", []),
+            closures,
+            issues,
+        )
+
+        # 17. Statistical leakage diagnostic: no single public feature perfectly separates labels
         if gt_records and len(gt_records) >= 6:
             self._check_statistical_separation(gt_records, records, issues)
 
@@ -371,6 +401,288 @@ class Gate10DistributionSanity(ValidationGate):
             "severities": sorted(list(sev_counts.keys())),
         }
         return self.create_report(issues, metadata=metadata)
+
+    def _check_alert_burstiness_and_spacing(
+        self, alerts: list[Any], issues: list[ValidationIssue]
+    ) -> None:
+        """Verify alert inter-arrival intervals are not artificially constant."""
+        if len(alerts) < 10:
+            return
+        timestamps: list[datetime] = []
+        for a in alerts:
+            ts = getattr(a, "created_at_utc", None)
+            if isinstance(ts, datetime):
+                timestamps.append(ts)
+            elif isinstance(ts, str):
+                with contextlib.suppress(Exception):
+                    timestamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+
+        if len(timestamps) < 10:
+            return
+
+        timestamps.sort()
+        deltas = [
+            (timestamps[i + 1] - timestamps[i]).total_seconds() for i in range(len(timestamps) - 1)
+        ]
+        positive_deltas = [d for d in deltas if d > 0]
+        if (
+            len(positive_deltas) >= 5
+            and len(set(positive_deltas)) == 1
+            and len(positive_deltas) == len(deltas)
+        ):
+            issues.append(
+                ValidationIssue(
+                    code="DIST_SUSPICIOUSLY_UNIFORM_ALERT_SPACING",
+                    severity=GateSeverity.HIGH,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="alert",
+                    target="created_at_utc",
+                    message=(
+                        f"Alert inter-arrival intervals are artificially identical: "
+                        f"all {len(deltas)} intervals equal {positive_deltas[0]}s"
+                    ),
+                    expected="Natural variance in alert inter-arrival spacing",
+                    actual=f"Constant interval {positive_deltas[0]}s",
+                )
+            )
+
+    def _check_alert_category_diversity(
+        self, alerts: list[Any], issues: list[ValidationIssue]
+    ) -> None:
+        """Verify alert categories have reasonable diversity when sample size is sufficient."""
+        if len(alerts) < 15:
+            return
+        categories = [
+            getattr(a, "alert_category", None) or getattr(a, "category", None) for a in alerts
+        ]
+        valid_cats = {c for c in categories if c}
+        if len(valid_cats) == 1:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_ALERT_CATEGORY_HOMOGENEITY",
+                    severity=GateSeverity.HIGH,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="alert",
+                    target="alert_category",
+                    message="All alerts have identical category (missing category diversity)",
+                    expected="Diverse alert categories",
+                    actual=str(list(valid_cats)),
+                )
+            )
+
+    def _check_case_duration_and_notes(
+        self,
+        cases: list[Any],
+        closures: list[Any],
+        investigations: list[Any],
+        issues: list[ValidationIssue],
+    ) -> None:
+        """Verify case duration bounds, zero variance, and investigation note diversity."""
+        case_created_map = {
+            str(getattr(c, "case_id", "")): getattr(c, "created_at_utc", None) for c in cases
+        }
+        durations: list[float] = []
+        for cl in closures:
+            c_id = str(getattr(cl, "case_id", ""))
+            c_created = case_created_map.get(c_id)
+            cl_time = getattr(cl, "created_at_utc", None)
+            if c_created and cl_time and cl_time >= c_created:
+                dur_secs = (cl_time - c_created).total_seconds()
+                durations.append(dur_secs)
+                if dur_secs > 365 * 86400:
+                    issues.append(
+                        ValidationIssue(
+                            code="DIST_EXCESSIVE_CASE_DURATION",
+                            severity=GateSeverity.HIGH,
+                            gate_index=10,
+                            gate_name=self.gate_name,
+                            scope="closure",
+                            target=c_id,
+                            message=(
+                                f"Case '{c_id}' duration exceeds 365 days "
+                                f"({dur_secs / 86400:.1f} days)"
+                            ),
+                            expected="Case duration <= 365 days",
+                            actual=f"{dur_secs / 86400:.1f} days",
+                        )
+                    )
+
+        if len(durations) >= 5 and len(set(durations)) == 1:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_ZERO_VARIANCE_CASE_DURATION",
+                    severity=GateSeverity.HIGH,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="closure",
+                    target="case_duration",
+                    message=(
+                        "All closed cases have identical duration down to the second "
+                        "(zero variance)"
+                    ),
+                    expected="Varied case duration distribution",
+                    actual=f"All {len(durations)} cases duration = {durations[0]}s",
+                )
+            )
+
+        notes = [
+            str(getattr(inv, "summary", "") or getattr(inv, "notes", ""))
+            for inv in investigations
+            if hasattr(inv, "summary") or hasattr(inv, "notes")
+        ]
+        non_empty_notes = [n for n in notes if n.strip()]
+        if len(non_empty_notes) >= 5 and len(set(non_empty_notes)) == 1:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_PATHOLOGICAL_NOTE_DUPLICATION",
+                    severity=GateSeverity.HIGH,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="investigation",
+                    target="notes",
+                    message=(
+                        "All investigation notes across cases are 100% identical copy-paste strings"
+                    ),
+                    expected="Distinct investigation notes and summaries across cases",
+                    actual="100% identical notes",
+                )
+            )
+
+    def _check_cross_entity_divergence(
+        self,
+        orgs: list[Any],
+        alerts: list[Any],
+        issues: list[ValidationIssue],
+    ) -> None:
+        """Detect multiple entities having suspiciously identical alert distributions."""
+        if len(orgs) < 2 or len(alerts) < 10:
+            return
+        alerts_by_org: dict[str, list[Any]] = {}
+        for a in alerts:
+            org_id = str(getattr(a, "organization_id", ""))
+            if org_id:
+                alerts_by_org.setdefault(org_id, []).append(a)
+
+        org_keys = list(alerts_by_org.keys())
+        for i in range(len(org_keys)):
+            for j in range(i + 1, len(org_keys)):
+                org1, org2 = org_keys[i], org_keys[j]
+                list1, list2 = alerts_by_org[org1], alerts_by_org[org2]
+                if len(list1) >= 5 and len(list1) == len(list2):
+                    ts1 = [str(getattr(a, "created_at_utc", "")) for a in list1]
+                    ts2 = [str(getattr(a, "created_at_utc", "")) for a in list2]
+                    if ts1 == ts2:
+                        issues.append(
+                            ValidationIssue(
+                                code="DIST_IDENTICAL_ENTITY_ALERT_DISTRIBUTIONS",
+                                severity=GateSeverity.BLOCKING,
+                                gate_index=10,
+                                gate_name=self.gate_name,
+                                scope="cross_entity",
+                                target=f"{org1}:{org2}",
+                                message=(
+                                    f"Entities '{org1}' and '{org2}' have suspiciously identical "
+                                    f"alert counts and timestamps down to the second"
+                                ),
+                                expected="Divergent cross-entity alert distributions",
+                                actual=f"Identical timestamps across {len(ts1)} alerts",
+                            )
+                        )
+
+    def _check_asset_criticality_mix(
+        self, assets: list[Any], issues: list[ValidationIssue]
+    ) -> None:
+        """Verify asset criticality mix is not completely homogeneous."""
+        if len(assets) < 10:
+            return
+        crits = [getattr(ast, "criticality", None) for ast in assets if hasattr(ast, "criticality")]
+        valid_crits = {c for c in crits if c}
+        if len(valid_crits) == 1:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_ASSET_CRITICALITY_HOMOGENEITY",
+                    severity=GateSeverity.WARNING,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="asset",
+                    target="criticality",
+                    message=(
+                        "All assets have identical criticality level "
+                        "(missing criticality diversity)"
+                    ),
+                    expected="Mixed asset criticality levels (LOW, MEDIUM, HIGH, CRITICAL)",
+                    actual=str(list(valid_crits)),
+                )
+            )
+
+    def _check_mutation_prevalence_bounds(
+        self,
+        receipts: list[Any],
+        records: dict[str, list[Any]],
+        issues: list[ValidationIssue],
+    ) -> None:
+        """Verify quality mutation prevalence remains bounded and sparse per §21.2."""
+        if not receipts or not records:
+            return
+        quality_count = sum(
+            1 for r in receipts if str(getattr(r, "scenario_id", "")) == "QUALITY_ENGINE"
+        )
+        total_records = sum(len(lst) for lst in records.values())
+        if total_records == 0:
+            return
+        prevalence = quality_count / total_records
+        if prevalence > 0.35:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_EXCESSIVE_MUTATION_PREVALENCE",
+                    severity=GateSeverity.HIGH,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="quality_prevalence",
+                    target="mutation_rate",
+                    message=(
+                        f"Quality mutation prevalence ({prevalence:.1%}) exceeds authoritative "
+                        f"sanity bound (35%)"
+                    ),
+                    expected="Quality mutation rate <= 35% of total records",
+                    actual=f"{prevalence:.1%} ({quality_count}/{total_records})",
+                )
+            )
+
+    def _check_workflow_rates(
+        self,
+        cases: list[Any],
+        escalations: list[Any],
+        actions: list[Any],
+        resolutions: list[Any],
+        closures: list[Any],
+        issues: list[ValidationIssue],
+    ) -> None:
+        """Verify workflow rates have valid denominators and no impossible negative values."""
+        if not cases:
+            return
+        denom = len(cases)
+        esc_rate = len(escalations) / denom
+        act_rate = len(actions) / denom
+        res_rate = len(resolutions) / denom
+        clo_rate = len(closures) / denom
+
+        if esc_rate < 0 or act_rate < 0 or res_rate < 0 or clo_rate < 0:
+            issues.append(
+                ValidationIssue(
+                    code="DIST_IMPOSSIBLE_WORKFLOW_RATE",
+                    severity=GateSeverity.BLOCKING,
+                    gate_index=10,
+                    gate_name=self.gate_name,
+                    scope="workflow",
+                    target="rates",
+                    message="Negative workflow rate detected",
+                    expected="Rates >= 0",
+                    actual=f"esc={esc_rate}, act={act_rate}, res={res_rate}, clo={clo_rate}",
+                )
+            )
 
     def _check_statistical_separation(
         self,

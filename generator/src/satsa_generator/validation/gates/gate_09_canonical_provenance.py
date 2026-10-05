@@ -142,7 +142,20 @@ class Gate09CanonicalProvenance(ValidationGate):
                     records = [json.loads(line) for line in lines if line.strip()]
                 source_cache[file_p] = records
                 return records
-            except Exception:
+            except Exception as exc:
+                issues.append(
+                    ValidationIssue(
+                        code="PROV_SOURCE_FILE_CORRUPT",
+                        severity=GateSeverity.BLOCKING,
+                        gate_index=9,
+                        gate_name=self.gate_name,
+                        scope="source_file",
+                        target=file_p.name,
+                        message=f"Source file '{file_p.name}' is corrupt or unreadable: {exc}",
+                        expected="Readable, well-formed source file",
+                        actual=str(exc),
+                    )
+                )
                 return None
 
         # 1. Validate index entries
@@ -227,6 +240,23 @@ class Gate09CanonicalProvenance(ValidationGate):
 
         # 2. Validate field & relationship provenance
         for prov_file in prov_files:
+            prof_parts = prov_file.stem.split("_")
+            if len(prof_parts) < 2:
+                issues.append(
+                    ValidationIssue(
+                        code="PROV_UNKNOWN_PROFILE",
+                        severity=GateSeverity.BLOCKING,
+                        gate_index=9,
+                        gate_name=self.gate_name,
+                        scope="profile",
+                        target=prov_file.name,
+                        message=f"Provenance file '{prov_file.name}' lacks valid profile prefix",
+                        expected="File name starting with <profile>_provenance.json",
+                        actual=prov_file.name,
+                    )
+                )
+                continue
+            prof_suffix = f"{prof_parts[0].upper()}-{prof_parts[1].upper()}"
             try:
                 p_data = json.loads(prov_file.read_text(encoding="utf-8"))
                 field_prov_list = p_data.get("field_provenance", [])
@@ -270,6 +300,22 @@ class Gate09CanonicalProvenance(ValidationGate):
 
                     records = _get_source_records(src_path)
                     if records is None:
+                        continue
+
+                    # Check if this record was explicitly withheld by PARTIAL_SUBMISSION
+                    is_withheld = False
+                    if context.ledger:
+                        for entry in context.ledger.entries.values():
+                            m_tp = str(getattr(entry, "mutation_type", ""))
+                            if "." in m_tp:
+                                m_tp = m_tp.split(".")[-1]
+                            t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                            if m_tp == "PARTIAL_SUBMISSION" and can_id_str in t_ids:
+                                s_file = getattr(entry, "source_file", None)
+                                if not s_file or s_file == src_file_name:
+                                    is_withheld = True
+                                    break
+                    if is_withheld:
                         continue
 
                     # Parse locator index
@@ -345,16 +391,27 @@ class Gate09CanonicalProvenance(ValidationGate):
                             for entry in context.ledger.entries.values():
                                 t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
                                 t_fld = getattr(entry, "target_field", None)
+                                s_fld = getattr(entry, "source_field", None)
+                                s_file = getattr(entry, "source_file", None)
+                                s_loc = getattr(entry, "source_locator", None)
+                                s_prof = getattr(entry, "source_profile", None)
                                 m_tp = str(getattr(entry, "mutation_type", ""))
                                 if "." in m_tp:
                                     m_tp = m_tp.split(".")[-1]
-                                if (
-                                    can_id_str in t_ids
-                                    and m_tp == "MISSING_FIELD"
-                                    and (
-                                        t_fld in (src_field, fp.get("canonical_field_name"))
-                                        or t_fld is None
-                                    )
+
+                                if can_id_str not in t_ids or m_tp != "MISSING_FIELD":
+                                    continue
+                                if s_file and s_file != src_file_name:
+                                    continue
+                                if s_loc and s_loc != locator:
+                                    continue
+                                if s_prof and s_prof != prof_suffix:
+                                    continue
+
+                                allowed_fields = {f for f in (t_fld, s_fld) if f}
+                                if allowed_fields and (
+                                    src_field in allowed_fields
+                                    or fp.get("canonical_field_name") in allowed_fields
                                 ):
                                     is_auth_missing_field = True
                                     break
@@ -385,30 +442,40 @@ class Gate09CanonicalProvenance(ValidationGate):
                             for entry in context.ledger.entries.values():
                                 t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
                                 t_fld = getattr(entry, "target_field", None)
+                                s_fld = getattr(entry, "source_field", None)
+                                s_file = getattr(entry, "source_file", None)
+                                s_loc = getattr(entry, "source_locator", None)
+                                s_prof = getattr(entry, "source_profile", None)
                                 m_tp = str(getattr(entry, "mutation_type", ""))
                                 if "." in m_tp:
                                     m_tp = m_tp.split(".")[-1]
 
-                                if can_id_str in t_ids:
-                                    can_fld = fp.get("canonical_field_name")
-                                    if t_fld in (src_field, can_fld) or t_fld is None:
-                                        is_auth_change = True
-                                        break
-                                    if m_tp in (
-                                        "SCHEMA_DRIFT",
-                                        "TIMESTAMP_PROBLEM",
-                                        "BROKEN_RELATIONSHIP",
-                                        "MALFORMED_VALUE",
-                                        "MISSING_FIELD",
-                                        "VOCABULARY_DRIFT",
-                                        "LATE_ARRIVAL",
-                                        "COUNT_MISMATCH",
-                                        "SOURCE_ID_ABSENCE",
-                                        "EXACT_DUPLICATE",
-                                        "CONFLICTING_DUPLICATE",
-                                    ) and t_fld in (src_field, can_fld):
-                                        is_auth_change = True
-                                        break
+                                if can_id_str not in t_ids:
+                                    continue
+                                if s_file and s_file != src_file_name:
+                                    continue
+                                if (
+                                    s_loc
+                                    and m_tp not in ("EXACT_DUPLICATE", "CONFLICTING_DUPLICATE")
+                                    and s_loc != locator
+                                ):
+                                    continue
+                                if s_prof and s_prof != prof_suffix:
+                                    continue
+
+                                can_fld = fp.get("canonical_field_name")
+                                allowed_fields = {f for f in (t_fld, s_fld) if f}
+                                if allowed_fields and (
+                                    src_field in allowed_fields or can_fld in allowed_fields
+                                ):
+                                    is_auth_change = True
+                                    break
+
+                                if m_tp == "CONFLICTING_DUPLICATE" and (
+                                    src_field == "severity" or can_fld == "severity"
+                                ):
+                                    is_auth_change = True
+                                    break
 
                         if not is_auth_change:
                             issues.append(
@@ -456,15 +523,35 @@ class Gate09CanonicalProvenance(ValidationGate):
                     if context.ledger:
                         for entry in context.ledger.entries.values():
                             t_ids = [str(x) for x in getattr(entry, "target_record_ids", ())]
+                            s_file = getattr(entry, "source_file", None)
+                            s_loc = getattr(entry, "source_locator", None)
+                            s_prof = getattr(entry, "source_profile", None)
+                            t_rel = getattr(entry, "target_relationship", None)
+                            s_fld = getattr(entry, "source_field", None)
                             m_tp = str(getattr(entry, "mutation_type", ""))
                             if "." in m_tp:
                                 m_tp = m_tp.split(".")[-1]
-                            if sub_id in t_ids and m_tp in (
+
+                            if sub_id not in t_ids or m_tp not in (
                                 "BROKEN_RELATIONSHIP",
                                 "REMOVE_RELATIONSHIP",
                             ):
-                                is_auth_rel = True
-                                break
+                                continue
+
+                            if s_file and s_file != src_file_name:
+                                continue
+                            if s_loc and s_loc != loc:
+                                continue
+                            if s_prof and s_prof != prof_suffix:
+                                continue
+
+                            allowed_rels = {r for r in (t_rel, s_fld) if r}
+                            rel_field = rp.get("source_relationship_field")
+                            if allowed_rels and rel_field and rel_field not in allowed_rels:
+                                continue
+
+                            is_auth_rel = True
+                            break
 
                     is_auth_rel_loc = is_auth_rel
                     if not is_auth_rel_loc and context.ledger:

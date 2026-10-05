@@ -31,13 +31,22 @@ def _copy_records(records: dict[str, list[Any]]) -> dict[str, list[Any]]:
     return {family: list(item_list) for family, item_list in records.items()}
 
 
+def _get_plan_target_record_ids(plan: QualityPlan) -> tuple[str, ...]:
+    """Return explicit target record IDs, including withheld record for partial submission."""
+    if plan.mutation_type == QualityMutationType.PARTIAL_SUBMISSION and plan.parameters.get(
+        "withheld_record_id"
+    ):
+        return (plan.target_record_id, str(plan.parameters["withheld_record_id"]))
+    return (plan.target_record_id,)
+
+
 def _verify_quality_auth(plan: QualityPlan, ledger: AuthorizationLedger) -> None:
     """Verify authorization in the ledger prior to mutation."""
     ledger.verify_authorization(
         plan.plan_id,
         expected_scenario_id="QUALITY_ENGINE",
         expected_mutation_type=MutationType(plan.mutation_type.value),
-        target_record_ids=(plan.target_record_id,),
+        target_record_ids=_get_plan_target_record_ids(plan),
         target_family=plan.target_family,
     )
 
@@ -55,7 +64,7 @@ def _consume_quality_auth(
         plan_id=plan.plan_id,
         scenario_id="QUALITY_ENGINE",
         mutation_type=MutationType(plan.mutation_type.value),
-        target_record_ids=(plan.target_record_id,),
+        target_record_ids=_get_plan_target_record_ids(plan),
         target_family=plan.target_family,
         target_fields=target_fields,
         before_state=before_state,
@@ -75,50 +84,59 @@ def _apply_source_file_mutation(
 
     Authoritative targeting requirements:
     1. Resolve exact target: family, record ID, file, locator, and field.
-    2. Fail loudly (QualityMutationError) if target cannot be resolved.
+    2. Fail loudly (QualityMutationError) if any required target is missing or invalid.
     3. Modify only the intended record/field/file without side effects.
     4. Return exact mutation details for receipt auditing.
     """
     if not source_exports_root or not source_exports_root.exists():
         return {}
 
+    m_id = plan.plan_id
     m_type = plan.mutation_type
     target_fam = plan.target_family
     target_rec_id = str(plan.target_record_id)
 
-    # 1. Resolve source file
-    if plan.source_file:
-        source_file_name = plan.source_file
-        file_path = source_exports_root / source_file_name
-    else:
-        # Default to SRC-A dialect file or first matching family file
-        file_path = source_exports_root / f"{target_fam}_src-a.csv"
-        if not file_path.exists():
-            candidates = sorted(list(source_exports_root.glob(f"{target_fam}_*.*")))
-            if not candidates:
-                raise QualityMutationError(
-                    f"Target family '{target_fam}' has no rendered source files "
-                    f"in {source_exports_root}"
-                )
-            file_path = candidates[0]
-        source_file_name = file_path.name
+    # 1. Enforce explicit source file (NO FALLBACK to candidates[0] or default SRC-A)
+    if not plan.source_file:
+        raise QualityMutationError(
+            f"Mutation '{m_id}' ({m_type}): missing required explicit source_file"
+        )
+    source_file_name = plan.source_file
+    file_path = source_exports_root / source_file_name
+
+    # 2. Enforce explicit source profile (NO FALLBACK to default profile)
+    source_prof = plan.source_profile_id
+    if not source_prof:
+        raise QualityMutationError(
+            f"Mutation '{m_id}' ({m_type}): missing required explicit source_profile_id"
+        )
+
+    # 3. Enforce explicit source locator (NO FALLBACK to searching or last row)
+    if not plan.source_locator:
+        raise QualityMutationError(
+            f"Mutation '{m_id}' ({m_type}): missing required explicit source_locator"
+        )
 
     # Handle MISSING_FAMILY by removing rendered file
     if m_type == QualityMutationType.MISSING_FAMILY:
         if not file_path.exists():
             raise QualityMutationError(
-                f"Target source file '{source_file_name}' for MISSING_FAMILY does not exist"
+                f"Mutation '{m_id}': Target source file '{source_file_name}' for "
+                f"MISSING_FAMILY does not exist on disk in {source_exports_root}"
             )
         file_path.unlink()
         return {
-            "source_file": source_file_name,
+            "mutation_id": m_id,
             "mutation_type": "MISSING_FAMILY",
+            "source_profile": source_prof,
+            "source_file": source_file_name,
+            "source_locator": plan.source_locator,
             "deleted": True,
         }
 
     if not file_path.exists():
         raise QualityMutationError(
-            f"Target source file '{source_file_name}' does not exist on disk"
+            f"Mutation '{m_id}': Target source file '{source_file_name}' does not exist on disk"
         )
 
     ext = file_path.suffix.lstrip(".").lower()
@@ -142,70 +160,66 @@ def _apply_source_file_mutation(
         lines = file_path.read_text(encoding="utf-8").strip().splitlines()
         records = [json_mod.loads(ln) for ln in lines if ln.strip()]
     else:
-        raise QualityMutationError(f"Unsupported source format: {ext}")
+        raise QualityMutationError(
+            f"Mutation '{m_id}': Unsupported source format '{ext}' in '{source_file_name}'"
+        )
 
-    if not records and m_type != QualityMutationType.MISSING_FAMILY:
-        raise QualityMutationError(f"Source file '{source_file_name}' is empty")
+    if not records:
+        raise QualityMutationError(f"Mutation '{m_id}': Source file '{source_file_name}' is empty")
 
-    # 2. Locate exact source record
-    target_row_idx: int | None = None
-    resolved_locator: str = ""
-
-    if plan.source_locator:
-        loc = plan.source_locator.strip()
-        if loc.startswith("row:"):
-            try:
-                row_num = int(loc.split(":")[1])
-                target_row_idx = row_num - 1
-            except ValueError as err:
-                raise QualityMutationError(
-                    f"Invalid row locator format '{plan.source_locator}'"
-                ) from err
-        elif loc.startswith("[") and loc.endswith("]"):
-            try:
-                target_row_idx = int(loc[1:-1])
-            except ValueError as err:
-                raise QualityMutationError(
-                    f"Invalid index locator format '{plan.source_locator}'"
-                ) from err
-        else:
-            raise QualityMutationError(f"Unrecognized locator format '{plan.source_locator}'")
-
-        if target_row_idx < 0 or target_row_idx >= len(records):
+    loc = plan.source_locator.strip()
+    target_row_idx: int
+    if loc.startswith("row:"):
+        try:
+            row_num = int(loc.split(":")[1])
+            target_row_idx = row_num - 1
+        except ValueError as err:
             raise QualityMutationError(
-                f"Source locator '{plan.source_locator}' out of bounds in '{source_file_name}' "
-                f"(file has {len(records)} records)"
-            )
+                f"Mutation '{m_id}': Invalid row locator format '{plan.source_locator}'"
+            ) from err
+    elif loc.startswith("[") and loc.endswith("]"):
+        try:
+            target_row_idx = int(loc[1:-1])
+        except ValueError as err:
+            raise QualityMutationError(
+                f"Mutation '{m_id}': Invalid index locator format '{plan.source_locator}'"
+            ) from err
+    else:
+        raise QualityMutationError(
+            f"Mutation '{m_id}': Unrecognized locator format '{plan.source_locator}'"
+        )
 
-        # 3. Verify the expected source record ID
-        rec = records[target_row_idx]
-        # Identify ID column in record
-        id_candidates = [
-            f"{target_fam}_id",
-            "alert_id",
-            "case_id",
-            "submission_id",
-            "submission_family_id",
-            "case_alert_link_id",
-            "asset_id",
-            "organization_id",
-        ]
+    if target_row_idx < 0 or target_row_idx >= len(records):
+        raise QualityMutationError(
+            f"Mutation '{m_id}': Source locator '{plan.source_locator}' out of bounds "
+            f"in '{source_file_name}' (file has {len(records)} records)"
+        )
+
+    # 4. Verify record identity at target locator
+    rec = records[target_row_idx]
+    if m_type == QualityMutationType.PARTIAL_SUBMISSION:
+        expected_withheld_id = str(plan.parameters.get("withheld_record_id") or "")
+        if not expected_withheld_id:
+            raise QualityMutationError(
+                f"Mutation '{m_id}': PARTIAL_SUBMISSION requires explicit 'withheld_record_id'"
+            )
+        withheld_fam = str(plan.parameters.get("withheld_family") or "alert")
+        id_candidates = [f"{withheld_fam}_id", "id", "alert_id", "submission_id"]
         matched_id: str | None = None
         for id_col in id_candidates:
             if id_col in rec and rec[id_col]:
                 matched_id = str(rec[id_col])
                 break
-
-        if matched_id and matched_id != target_rec_id:
+        if not matched_id or matched_id != expected_withheld_id:
             raise QualityMutationError(
-                f"Record at locator '{plan.source_locator}' in '{source_file_name}' "
-                f"has ID '{matched_id}', does not match expected target record ID '{target_rec_id}'"
+                f"Mutation '{m_id}': Record at locator '{plan.source_locator}' in "
+                f"'{source_file_name}' has ID '{matched_id}', does not match expected "
+                f"withheld record ID '{expected_withheld_id}'"
             )
-        resolved_locator = plan.source_locator
     else:
-        # Search for exact target record by ID
         id_candidates = [
             f"{target_fam}_id",
+            "id",
             "alert_id",
             "case_id",
             "submission_id",
@@ -214,197 +228,161 @@ def _apply_source_file_mutation(
             "asset_id",
             "organization_id",
         ]
-        for idx, rec in enumerate(records):
-            for id_col in id_candidates:
-                if id_col in rec and str(rec[id_col]) == target_rec_id:
-                    target_row_idx = idx
-                    resolved_locator = f"row:{idx + 1}" if ext == "csv" else f"[{idx}]"
-                    break
-            if target_row_idx is not None:
+        matched_id = None
+        for id_col in id_candidates:
+            if id_col in rec and rec[id_col]:
+                matched_id = str(rec[id_col])
                 break
-
-        if target_row_idx is None:
-            # If still not found and PARTIAL_SUBMISSION / MISSING_FAMILY, allow first/last row
-            if m_type == QualityMutationType.PARTIAL_SUBMISSION:
-                target_row_idx = len(records) - 1
-                resolved_locator = (
-                    f"row:{target_row_idx + 1}" if ext == "csv" else f"[{target_row_idx}]"
-                )
-            else:
-                raise QualityMutationError(
-                    f"Target record ID '{target_rec_id}' not found in source file "
-                    f"'{source_file_name}'"
-                )
-
-    # 4. Resolve and verify target field
-    field_to_modify = plan.source_field or plan.target_field
-    row_to_modify = records[target_row_idx]
-    before_val = None
-
-    if field_to_modify and field_to_modify not in row_to_modify:
-        # Check common synonyms or dialect naming variations
-        synonyms = {
-            "source_alert_id": ["src_alert_id", "source_alert_id"],
-            "source_case_id": ["src_case_id", "source_case_id", "case_id"],
-            "declared_record_count": [
-                "declared_record_count",
-                "DeclaredRecordCount",
-                "declaredRecordCount",
-                "decl_rec_count",
-                "decl_count",
-            ],
-        }
-        found = False
-        for alt in synonyms.get(field_to_modify, []):
-            if alt in row_to_modify:
-                field_to_modify = alt
-                found = True
-                break
-        if not found and m_type not in (
-            QualityMutationType.SCHEMA_DRIFT,
-            QualityMutationType.PARTIAL_SUBMISSION,
-            QualityMutationType.EXACT_DUPLICATE,
-        ):
+        if not matched_id or matched_id != target_rec_id:
             raise QualityMutationError(
-                f"Target source field '{field_to_modify}' not found in record at "
-                f"{resolved_locator} in '{source_file_name}'"
+                f"Mutation '{m_id}': Record at locator '{plan.source_locator}' in "
+                f"'{source_file_name}' has ID '{matched_id}', does not match expected "
+                f"target record ID '{target_rec_id}'"
             )
 
-    if field_to_modify and field_to_modify in row_to_modify:
-        before_val = row_to_modify[field_to_modify]
+    resolved_locator = plan.source_locator
 
+    # 5. Enforce explicit field / relationship (NO FALLBACK to searching arbitrary columns)
+    field_to_modify: str | None = None
+    if m_type == QualityMutationType.BROKEN_RELATIONSHIP:
+        field_to_modify = plan.target_relationship or plan.source_field
+        if not field_to_modify:
+            raise QualityMutationError(
+                f"Mutation '{m_id}' (BROKEN_RELATIONSHIP): missing explicit target_relationship"
+            )
+        if field_to_modify not in rec:
+            raise QualityMutationError(
+                f"Mutation '{m_id}': Relationship field '{field_to_modify}' not found "
+                f"in record at {resolved_locator} in '{source_file_name}'"
+            )
+    elif m_type == QualityMutationType.SCHEMA_DRIFT:
+        field_to_modify = plan.source_field or plan.target_field
+        if not field_to_modify:
+            raise QualityMutationError(
+                f"Mutation '{m_id}' (SCHEMA_DRIFT): missing required explicit field to modify"
+            )
+    elif m_type in (QualityMutationType.PARTIAL_SUBMISSION, QualityMutationType.EXACT_DUPLICATE):
+        field_to_modify = None  # record withholding or whole-row duplication
+    else:
+        field_to_modify = plan.source_field or plan.target_field
+        if not field_to_modify:
+            raise QualityMutationError(
+                f"Mutation '{m_id}' ({m_type}): missing required explicit field to modify"
+            )
+        if field_to_modify not in rec:
+            raise QualityMutationError(
+                f"Mutation '{m_id}': Target source field '{field_to_modify}' not found "
+                f"in record at {resolved_locator} in '{source_file_name}'"
+            )
+
+    row_to_modify = records[target_row_idx]
+    before_val = row_to_modify.get(field_to_modify) if field_to_modify else None
     after_val = None
 
-    # 5. Apply the exact mutation
+    # 6. Apply the exact mutation operation
     if m_type == QualityMutationType.MISSING_FIELD:
-        if not field_to_modify or field_to_modify not in row_to_modify:
-            raise QualityMutationError(
-                f"Cannot apply MISSING_FIELD: field '{field_to_modify}' not found"
-            )
+        assert field_to_modify is not None
         row_to_modify[field_to_modify] = ""
         after_val = ""
 
     elif m_type == QualityMutationType.PARTIAL_SUBMISSION:
-        # Truncate / remove records from submission
-        if len(records) > 1:
-            records = records[:-1]
-        after_val = "TRUNCATED"
+        withheld_row = records.pop(target_row_idx)
+        after_val = "WITHHELD"
+        # Write back and return detailed receipt
+        if ext == "csv":
+            with file_path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv_mod.DictWriter(f, fieldnames=header, lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(records)
+        elif ext == "json":
+            file_path.write_text(json_mod.dumps(records, indent=2), encoding="utf-8")
+        elif ext == "jsonl":
+            file_path.write_text(
+                "\n".join(json_mod.dumps(r) for r in records) + "\n", encoding="utf-8"
+            )
+
+        return {
+            "mutation_id": m_id,
+            "mutation_type": "PARTIAL_SUBMISSION",
+            "source_profile": plan.source_profile_id,
+            "source_file": source_file_name,
+            "source_locator": resolved_locator,
+            "withheld_record_id": plan.parameters.get("withheld_record_id"),
+            "withheld_family": plan.parameters.get("withheld_family"),
+            "withheld_source_file": source_file_name,
+            "withheld_source_locator": resolved_locator,
+            "withheld_record_content": withheld_row,
+            "source_before": "PRESENT",
+            "source_after": after_val,
+        }
 
     elif m_type == QualityMutationType.MALFORMED_VALUE:
-        if not field_to_modify or field_to_modify not in row_to_modify:
-            raise QualityMutationError(
-                f"Cannot apply MALFORMED_VALUE: field '{field_to_modify}' not found"
-            )
+        assert field_to_modify is not None
         malformed = str(plan.parameters.get("malformed_value", "MALFORMED_PRIORITY_##%"))
         row_to_modify[field_to_modify] = malformed
         after_val = malformed
 
     elif m_type == QualityMutationType.EXACT_DUPLICATE:
-        # Duplicate only this exact record
         dup_row = dict(row_to_modify)
         records.append(dup_row)
         after_val = "DUPLICATED"
 
     elif m_type == QualityMutationType.CONFLICTING_DUPLICATE:
-        # Duplicate this exact record with conflicting content
+        assert field_to_modify is not None
         dup_row = dict(row_to_modify)
-        conf_field = field_to_modify or "severity"
-        if conf_field in dup_row:
-            dup_row[conf_field] = "LOW"
+        dup_row[field_to_modify] = plan.parameters.get("conflicting_value", "LOW")
         records.append(dup_row)
-        after_val = "CONFLICTING_DUPLICATE"
+        after_val = f"CONFLICTING_DUPLICATE({dup_row[field_to_modify]})"
 
     elif m_type == QualityMutationType.BROKEN_RELATIONSHIP:
-        rel_field = plan.target_relationship or "alert_id"
-        if rel_field not in row_to_modify:
-            # Look for foreign key columns
-            for col in ("alert_id", "case_id", "asset_id"):
-                if col in row_to_modify:
-                    rel_field = col
-                    break
-        if rel_field in row_to_modify:
-            before_val = row_to_modify[rel_field]
-            row_to_modify[rel_field] = "00000000-0000-0000-0000-000000000000"
-            after_val = "00000000-0000-0000-0000-000000000000"
-        else:
-            raise QualityMutationError(
-                "Cannot apply BROKEN_RELATIONSHIP: no relationship field found in record"
-            )
+        assert field_to_modify is not None
+        row_to_modify[field_to_modify] = "00000000-0000-0000-0000-000000000000"
+        after_val = "00000000-0000-0000-0000-000000000000"
 
     elif m_type == QualityMutationType.TIMESTAMP_PROBLEM:
-        ts_field = field_to_modify or "created_at_utc"
-        if ts_field not in row_to_modify:
-            for col in ("created_at", "created_at_utc", "started_at_utc"):
-                if col in row_to_modify:
-                    ts_field = col
-                    break
-        if ts_field in row_to_modify:
-            row_to_modify[ts_field] = "2099-01-01T00:00:00Z"
-            after_val = "2099-01-01T00:00:00Z"
-        else:
-            raise QualityMutationError(
-                f"Cannot apply TIMESTAMP_PROBLEM: timestamp field '{ts_field}' not found"
-            )
+        assert field_to_modify is not None
+        corrupted_ts = plan.parameters.get("corrupted_timestamp", "2099-01-01T00:00:00Z")
+        row_to_modify[field_to_modify] = corrupted_ts
+        after_val = corrupted_ts
 
     elif m_type == QualityMutationType.SCHEMA_DRIFT:
-        # Introduce drifted schema attribute
+        assert field_to_modify is not None
+        drifted_val = plan.parameters.get("drifted_value", "DRIFTED_V2")
         if ext == "csv":
-            if "workflow_version_v2" not in header:
-                header.append("workflow_version_v2")
+            if field_to_modify not in header:
+                header.append(field_to_modify)
             for r in records:
-                r["workflow_version_v2"] = ""
-            row_to_modify["workflow_version_v2"] = "DRIFTED_V2"
+                if field_to_modify not in r:
+                    r[field_to_modify] = ""
+            row_to_modify[field_to_modify] = drifted_val
         else:
-            row_to_modify["workflow_version_v2"] = "DRIFTED_V2"
-        after_val = "DRIFTED_V2"
+            row_to_modify[field_to_modify] = drifted_val
+        after_val = drifted_val
 
     elif m_type == QualityMutationType.VOCABULARY_DRIFT:
-        v_field = field_to_modify or "severity"
-        if v_field in row_to_modify:
-            row_to_modify[v_field] = "DRIFTED_CUSTOM_SEV"
-            after_val = "DRIFTED_CUSTOM_SEV"
-        else:
-            raise QualityMutationError(
-                f"Cannot apply VOCABULARY_DRIFT: field '{v_field}' not found"
-            )
+        assert field_to_modify is not None
+        drifted_tok = plan.parameters.get("drifted_token", "DRIFTED_CUSTOM_SEV")
+        row_to_modify[field_to_modify] = drifted_tok
+        after_val = drifted_tok
 
     elif m_type == QualityMutationType.LATE_ARRIVAL:
-        # Alter timestamp to a subsequent period
-        p_field = "created_at_utc" if "created_at_utc" in row_to_modify else "period"
-        if p_field in row_to_modify:
-            row_to_modify[p_field] = (
-                "2099-12-31T23:59:59Z" if p_field == "created_at_utc" else "P02"
-            )
-            after_val = row_to_modify[p_field]
-        else:
-            raise QualityMutationError(
-                "Cannot apply LATE_ARRIVAL: neither 'created_at_utc' nor 'period' found"
-            )
+        assert field_to_modify is not None
+        delayed_ts = plan.parameters.get("delayed_timestamp", "2099-12-31T23:59:59Z")
+        row_to_modify[field_to_modify] = delayed_ts
+        after_val = delayed_ts
 
     elif m_type == QualityMutationType.COUNT_MISMATCH:
-        c_field = field_to_modify or "declared_record_count"
-        if c_field in row_to_modify:
-            row_to_modify[c_field] = "99999"
-            after_val = "99999"
-        else:
-            raise QualityMutationError(
-                f"Cannot apply COUNT_MISMATCH: field '{c_field}' not found in record"
-            )
+        assert field_to_modify is not None
+        count_val = str(plan.parameters.get("mismatched_count", "99999"))
+        row_to_modify[field_to_modify] = count_val
+        after_val = count_val
 
     elif m_type == QualityMutationType.SOURCE_ID_ABSENCE:
-        # Blank out source ID
-        id_field = field_to_modify or (
-            "src_case_id" if "src_case_id" in row_to_modify else f"{target_fam}_id"
-        )
-        if id_field in row_to_modify:
-            row_to_modify[id_field] = ""
-            after_val = ""
-        else:
-            raise QualityMutationError(
-                f"Cannot apply SOURCE_ID_ABSENCE: ID field '{id_field}' not found"
-            )
+        assert field_to_modify is not None
+        row_to_modify[field_to_modify] = ""
+        after_val = ""
 
-    # 6. Write back to disk
+    # 7. Write back to disk
     if ext == "csv":
         with file_path.open("w", encoding="utf-8", newline="") as f:
             writer = csv_mod.DictWriter(f, fieldnames=header, lineterminator="\n")
@@ -416,6 +394,9 @@ def _apply_source_file_mutation(
         file_path.write_text("\n".join(json_mod.dumps(r) for r in records) + "\n", encoding="utf-8")
 
     return {
+        "mutation_id": m_id,
+        "mutation_type": str(m_type),
+        "source_profile": plan.source_profile_id,
         "source_file": source_file_name,
         "source_locator": resolved_locator,
         "source_field": field_to_modify,
@@ -435,7 +416,11 @@ def apply_missing_field(
     _verify_quality_auth(plan, ledger)
     new_records = _copy_records(records)
     family_list = new_records[plan.target_family]
-    target_field = plan.target_field or "source_alert_id"
+    target_field = plan.target_field or plan.source_field
+    if not target_field:
+        raise QualityMutationError(
+            f"Mutation '{plan.plan_id}' (MISSING_FIELD): missing explicit target_field"
+        )
 
     found_idx = -1
     for idx, rec in enumerate(family_list):
@@ -538,6 +523,14 @@ def apply_partial_submission(
     src_mut = _apply_source_file_mutation(plan, source_exports_root)
     if src_mut:
         after_state["source_mutation"] = src_mut
+        after_state["withheld_record_id"] = src_mut.get("withheld_record_id")
+        after_state["evidence_family"] = src_mut.get("withheld_family") or plan.parameters.get(
+            "withheld_family"
+        )
+        after_state["source_profile"] = src_mut.get("source_profile") or plan.source_profile_id
+        after_state["source_file"] = src_mut.get("source_file") or plan.source_file
+        after_state["source_locator"] = src_mut.get("source_locator") or plan.source_locator
+        after_state["mutation_id"] = plan.plan_id
     receipt = _consume_quality_auth(
         plan, ledger, before_state, after_state, ("reporting_period_end_at_utc",)
     )
@@ -555,7 +548,11 @@ def apply_malformed_value(
     _verify_quality_auth(plan, ledger)
     new_records = _copy_records(records)
     family_list = new_records[plan.target_family]
-    target_field = plan.target_field or "priority_source_text"
+    target_field = plan.target_field or plan.source_field
+    if not target_field:
+        raise QualityMutationError(
+            f"Mutation '{plan.plan_id}' (MALFORMED_VALUE): missing explicit target_field"
+        )
 
     found_idx = -1
     for idx, rec in enumerate(family_list):
@@ -665,7 +662,11 @@ def apply_broken_relationship(
     _verify_quality_auth(plan, ledger)
     new_records = _copy_records(records)
     family_list = new_records[plan.target_family]
-    target_rel = plan.target_relationship or "alert_id"
+    target_rel = plan.target_relationship or plan.source_field
+    if not target_rel:
+        raise QualityMutationError(
+            f"Mutation '{plan.plan_id}' (BROKEN_RELATIONSHIP): missing explicit target_relationship"
+        )
 
     found_idx = -1
     for idx, rec in enumerate(family_list):
@@ -704,7 +705,11 @@ def apply_timestamp_problem(
     _verify_quality_auth(plan, ledger)
     new_records = _copy_records(records)
     family_list = new_records[plan.target_family]
-    target_field = plan.target_field or "created_at_utc"
+    target_field = plan.target_field or plan.source_field
+    if not target_field:
+        raise QualityMutationError(
+            f"Mutation '{plan.plan_id}' (TIMESTAMP_PROBLEM): missing explicit target_field"
+        )
 
     found_idx = -1
     for idx, rec in enumerate(family_list):
@@ -758,7 +763,11 @@ def apply_schema_drift(
         )
 
     orig_rec = family_list[found_idx]
-    target_field = plan.target_field or "workflow_version"
+    target_field = plan.target_field or plan.source_field
+    if not target_field:
+        raise QualityMutationError(
+            f"Mutation '{plan.plan_id}' (SCHEMA_DRIFT): missing explicit target_field"
+        )
     before_state = {target_field: getattr(orig_rec, target_field, "wf-v1")}
     drift_val = "wf-v2.0-drift"
     mutated_rec = orig_rec.model_copy(update={target_field: drift_val})
@@ -783,7 +792,11 @@ def apply_vocabulary_drift(
     _verify_quality_auth(plan, ledger)
     new_records = _copy_records(records)
     family_list = new_records[plan.target_family]
-    target_field = plan.target_field or "priority_source_text"
+    target_field = plan.target_field or plan.source_field
+    if not target_field:
+        raise QualityMutationError(
+            f"Mutation '{plan.plan_id}' (VOCABULARY_DRIFT): missing explicit target_field"
+        )
 
     found_idx = -1
     for idx, rec in enumerate(family_list):
@@ -836,6 +849,7 @@ def apply_late_arrival(
         )
 
     orig_rec = family_list[found_idx]
+    target_field = plan.target_field or plan.source_field or "alert_summary"
     before_state = {"alert_summary": orig_rec.alert_summary}
     mutated_summary = (orig_rec.alert_summary or "") + " [LATE_ARRIVAL:SUBMISSION_BATCH_2]"
     mutated_rec = orig_rec.model_copy(update={"alert_summary": mutated_summary})
@@ -845,7 +859,7 @@ def apply_late_arrival(
     src_mut = _apply_source_file_mutation(plan, source_exports_root)
     if src_mut:
         after_state["source_mutation"] = src_mut
-    receipt = _consume_quality_auth(plan, ledger, before_state, after_state, ("alert_summary",))
+    receipt = _consume_quality_auth(plan, ledger, before_state, after_state, (target_field,))
     return new_records, receipt
 
 

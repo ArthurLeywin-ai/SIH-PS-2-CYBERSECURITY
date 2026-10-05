@@ -153,6 +153,23 @@ def build_m4_fixture(
     return build_fixture(config_path, master_seed, output_root=output_root, milestone="m4")
 
 
+def build_m5_fixture(
+    config_path: Path,
+    master_seed: bytes,
+    *,
+    output_root: Path | None = None,
+    run_validation: bool = True,
+) -> FixtureBuildResult:
+    """Convenience function to build Milestone 5 quality-mutated and validated fixture."""
+    return build_fixture(
+        config_path,
+        master_seed,
+        output_root=output_root,
+        milestone="m5",
+        run_validation=run_validation,
+    )
+
+
 def _build_m1_fixture_internal(
     config_path: Path,
     master_seed: bytes,
