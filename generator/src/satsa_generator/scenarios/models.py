@@ -56,6 +56,20 @@ class MutationType(enum.StrEnum):
     ALTER_PROPENSITY = "ALTER_PROPENSITY"
     DUPLICATE_RECORD = "DUPLICATE_RECORD"
     OMIT_FAMILY = "OMIT_FAMILY"
+    # Quality mutations from GENERATOR_IMPLEMENTATION_PLAN §13.2
+    MISSING_FIELD = "MISSING_FIELD"
+    MISSING_FAMILY = "MISSING_FAMILY"
+    PARTIAL_SUBMISSION = "PARTIAL_SUBMISSION"
+    MALFORMED_VALUE = "MALFORMED_VALUE"
+    EXACT_DUPLICATE = "EXACT_DUPLICATE"
+    CONFLICTING_DUPLICATE = "CONFLICTING_DUPLICATE"
+    BROKEN_RELATIONSHIP = "BROKEN_RELATIONSHIP"
+    TIMESTAMP_PROBLEM = "TIMESTAMP_PROBLEM"
+    SCHEMA_DRIFT = "SCHEMA_DRIFT"
+    VOCABULARY_DRIFT = "VOCABULARY_DRIFT"
+    LATE_ARRIVAL = "LATE_ARRIVAL"
+    COUNT_MISMATCH = "COUNT_MISMATCH"
+    SOURCE_ID_ABSENCE = "SOURCE_ID_ABSENCE"
 
 
 class AuthorizationStatus(enum.StrEnum):
@@ -206,6 +220,10 @@ class AuthorizationEntry(BaseModel):
     expected_semantic_effect: str = Field(min_length=1, max_length=512)
     seed_label: str = Field(min_length=1, max_length=256)
     status: AuthorizationStatus = Field(default=AuthorizationStatus.PLANNED)
+    target_field: str | None = Field(default=None, max_length=128)
+    expected_canonical_state: str | None = Field(default=None, max_length=64)
+    expected_quality_issue: str | None = Field(default=None, max_length=256)
+    correlation_group: str | None = Field(default=None, max_length=128)
 
 
 # ---------------------------------------------------------------------------

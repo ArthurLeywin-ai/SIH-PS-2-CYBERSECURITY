@@ -225,6 +225,38 @@ class ScenarioEngine:
                     plans.append(plan)
                     if scen_id != "PEER-CMP-001":
                         reserved_ids.update(plan.target_record_ids)
+                        if scen_id == "EXEC-GAP-001" and plan.realization in (
+                            RealizationState.CONCERNING,
+                            RealizationState.LEGITIMATE_UNUSUAL,
+                        ):
+                            case_id = plan.target_record_ids[0]
+                            for inv in records.get("investigation", []):
+                                if str(inv.case_id) == case_id:
+                                    reserved_ids.add(str(inv.investigation_id))
+                        elif scen_id == "SILENT-ESC-001" and plan.realization in (
+                            RealizationState.CONCERNING,
+                            RealizationState.LEGITIMATE_UNUSUAL,
+                        ):
+                            case_id = plan.target_record_ids[0]
+                            for esc in records.get("escalation", []):
+                                if str(esc.case_id) == case_id:
+                                    reserved_ids.add(str(esc.escalation_id))
+                        elif scen_id == "DEAD-END-001" and plan.realization in (
+                            RealizationState.CONCERNING,
+                            RealizationState.LEGITIMATE_UNUSUAL,
+                        ):
+                            case_id = plan.target_record_ids[0]
+                            for act in records.get("action", []):
+                                if str(act.case_id) == case_id:
+                                    reserved_ids.add(str(act.action_id))
+                        elif (
+                            scen_id == "INCONSIST-001"
+                            and plan.realization == RealizationState.CONCERNING
+                        ):
+                            case_id = plan.target_record_ids[0]
+                            for res in records.get("resolution", []):
+                                if str(res.case_id) == case_id:
+                                    reserved_ids.add(str(res.resolution_id))
                     break
                 except Exception:
                     continue

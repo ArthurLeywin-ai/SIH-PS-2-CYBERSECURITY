@@ -119,6 +119,7 @@ class FixtureManifest(FixtureRecord):
         "SATSA-M2-FIXTURE-V1",
         "SATSA-M3-FIXTURE-V1",
         "SATSA-M4-FIXTURE-V1",
+        "SATSA-M5-FIXTURE-V1",
     ]
     dataset_id: UUID
     dataset_version: str

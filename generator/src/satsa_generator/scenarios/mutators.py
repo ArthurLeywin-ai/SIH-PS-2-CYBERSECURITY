@@ -822,11 +822,24 @@ def _mutate_peer_cmp_001(
 
     if plan.realization == RealizationState.CONCERNING:
         investigations = result.get("investigation", [])
-        org_inv_count = sum(1 for inv in investigations if str(inv.organization_id) == target_org)
-        rng = seeds.get_rng(seed_label)
-        remove_count = max(1, org_inv_count // 2)
-        org_invs = [inv for inv in investigations if str(inv.organization_id) == target_org]
+        protected_ids = {
+            t_id
+            for entry in ledger.entries.values()
+            if entry.plan_id != plan.plan_id and entry.target_family == "investigation"
+            for t_id in entry.target_record_ids
+        }
+        org_invs = [
+            inv
+            for inv in investigations
+            if str(inv.organization_id) == target_org
+            and str(inv.investigation_id) not in protected_ids
+        ]
+        if not org_invs:
+            org_invs = [inv for inv in investigations if str(inv.organization_id) == target_org]
         if org_invs:
+            org_inv_count = len(org_invs)
+            rng = seeds.get_rng(seed_label)
+            remove_count = max(1, org_inv_count // 2)
             remove_indices = set(
                 int(i)
                 for i in rng.choice(
