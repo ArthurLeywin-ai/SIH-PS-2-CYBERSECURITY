@@ -107,10 +107,13 @@ def build_fixture(
     *,
     output_root: Path | None = None,
     milestone: Literal["m1", "m2", "m3", "m4", "m5"] = "m1",
+    run_validation: bool = True,
 ) -> FixtureBuildResult:
     """Build a deterministic fixture without truth or scenario metadata."""
     if milestone == "m5":
-        return _build_m5_fixture_internal(config_path, master_seed, output_root=output_root)
+        return _build_m5_fixture_internal(
+            config_path, master_seed, output_root=output_root, run_validation=run_validation
+        )
     elif milestone == "m4":
         return _build_m4_fixture_internal(config_path, master_seed, output_root=output_root)
     elif milestone == "m3":
@@ -712,6 +715,7 @@ def _build_m5_fixture_internal(
     master_seed: bytes,
     *,
     output_root: Path | None = None,
+    run_validation: bool = True,
 ) -> FixtureBuildResult:
     config = load_config(config_path)
     if config.tier.value != "deterministic_fixture":
@@ -724,7 +728,13 @@ def _build_m5_fixture_internal(
     _require_empty_output_root(root)
 
     operational_root = root / "operational_evidence"
+    source_exports_root = operational_root / "source_exports"
     private_root = root / "private_ground_truth"
+    oracle_root = private_root / "canonical_reference"
+
+    source_exports_root.mkdir(parents=True, exist_ok=True)
+    oracle_root.mkdir(parents=True, exist_ok=True)
+
     seeds = SeedManager(master_seed)
     ids = IDService(config.dataset_namespace)
 
@@ -752,13 +762,98 @@ def _build_m5_fixture_internal(
         "process_change": list(base_records[17]),
     }
 
+    # 1. M3 Source Rendering & Reconstruction
+    from satsa_generator.canonical.reconstruction import reconstruct_canonical_oracle_from_disk
+    from satsa_generator.profiles.catalog import get_profile
     from satsa_generator.quality.engine import QualityMutationEngine
+    from satsa_generator.rendering.engine import RenderingEngine
     from satsa_generator.scenarios.engine import ScenarioEngine
     from satsa_generator.validation.framework import ValidationRunner
     from satsa_generator.validation.leakage import ComprehensiveLeakageScanner
     from satsa_generator.validation.models import ValidationContext
 
-    # 1. Execute M4 Scenario Engine
+    profile_a = get_profile("SRC-A")
+    profile_b = get_profile("SRC-B")
+    profile_c = get_profile("SRC-C")
+    profile_d = get_profile("SRC-D")
+    profile_e = get_profile("SRC-E")
+
+    engine_a = RenderingEngine(source_exports_root, profile_a)
+    engine_b = RenderingEngine(source_exports_root, profile_b)
+    engine_c = RenderingEngine(source_exports_root, profile_c)
+    engine_d = RenderingEngine(source_exports_root, profile_d)
+    engine_e = RenderingEngine(source_exports_root, profile_e)
+
+    engines = [engine_a, engine_b, engine_c, engine_d, engine_e]
+    families_to_render = [
+        ("organization", base_records[0]),
+        ("submission", base_records[1]),
+        ("submission_manifest", base_records[2]),
+        ("submission_family", base_records[3]),
+        ("control_process_reference", base_records[4]),
+        ("control_process_subject_link", base_records[5]),
+        ("asset", base_records[6]),
+        ("monitoring_coverage", base_records[7]),
+        ("alert", base_records[8]),
+        ("case", base_records[9]),
+        ("case_alert_link", base_records[10]),
+        ("investigation", base_records[11]),
+        ("escalation", base_records[12]),
+        ("action", base_records[13]),
+        ("resolution", base_records[14]),
+        ("closure", base_records[15]),
+        ("exception", base_records[16]),
+        ("process_change", base_records[17]),
+    ]
+
+    for engine in engines:
+        for fam_name, rec_list in families_to_render:
+            if fam_name == "case":
+                engine.render_and_write(
+                    "case",
+                    rec_list,
+                    relationship_records=base_records[10],
+                    relationship_subject_field="case_id",
+                    relationship_object_field="case_id",
+                    relationship_target_field="alert_id",
+                )
+            elif fam_name == "alert":
+                engine.render_and_write(
+                    "alert",
+                    rec_list,
+                    relationship_records=base_records[10],
+                    relationship_subject_field="alert_id",
+                    relationship_object_field="alert_id",
+                    relationship_target_field="case_id",
+                )
+            else:
+                engine.render_and_write(fam_name, rec_list)
+
+    # Write metadata (indexes and provenance) to oracle_root
+    engine_a.write_metadata(oracle_root, "src_a")
+    engine_b.write_metadata(oracle_root, "src_b")
+    engine_c.write_metadata(oracle_root, "src_c")
+    engine_d.write_metadata(oracle_root, "src_d")
+    engine_e.write_metadata(oracle_root, "src_e")
+
+    # Reconstruct canonical reference from disk
+    import json as json_mod
+
+    for prefix, prof in [
+        ("src_a", profile_a),
+        ("src_b", profile_b),
+        ("src_c", profile_c),
+        ("src_d", profile_d),
+        ("src_e", profile_e),
+    ]:
+        oracle = reconstruct_canonical_oracle_from_disk(source_exports_root, oracle_root, prof)
+        oracle_data = [r.model_dump(mode="json") for r in oracle.expected_records.values()]
+        oracle_path = oracle_root / f"{prefix}_oracle.json"
+        oracle_path.write_text(
+            json_mod.dumps(oracle_data, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
+    # 2. Execute M4 Scenario Engine
     scenario_engine = ScenarioEngine(ids, seeds)
     scenario_result = scenario_engine.run_scenarios(records_dict)
     scenario_mutated_records = scenario_result.records
@@ -766,18 +861,19 @@ def _build_m5_fixture_internal(
     scenario_receipts = scenario_result.receipts
     ledger = scenario_engine.ledger
 
-    # 2. Execute M5 Data-Quality Mutation Engine
+    # 3. Execute M5 Data-Quality Mutation Engine (with source mutations)
     quality_engine = QualityMutationEngine(ids, seeds, ledger)
-    quality_result = quality_engine.execute_quality_mutations(scenario_mutated_records)
+    quality_result = quality_engine.execute_quality_mutations(
+        scenario_mutated_records,
+        source_exports_root=source_exports_root,
+    )
     mutated = quality_result.records
     quality_receipts = quality_result.receipts
     all_receipts = list(scenario_receipts) + list(quality_receipts)
 
-    # 3. Write private ground truth and ledger
+    # 4. Write private ground truth, ledger, and quality receipts
     scenario_engine.write_private_package(root)
     quality_receipts_path = private_root / "quality_receipts.json"
-    import json as json_mod
-
     quality_receipts_data = [
         {
             "authorization_id": r.authorization_id,
@@ -821,19 +917,28 @@ def _build_m5_fixture_internal(
         "process_changes.json": _serialize_records(mutated["process_change"]),
     }
 
-    # 4. Zero leakage scan on operational payloads
+    # Zero leakage scan on operational payloads
     for _name, content in payloads.items():
         parsed_payload = json_mod.loads(content.decode("utf-8"))
         ComprehensiveLeakageScanner.assert_no_leakage(parsed_payload)
 
-    files = [
-        {
-            "path": name,
-            "byte_size": len(content),
-            "sha256": hashlib.sha256(content).hexdigest(),
-        }
-        for name, content in sorted(payloads.items())
-    ]
+    # Write payloads to operational_root
+    for name, content in payloads.items():
+        (operational_root / name).write_bytes(content)
+
+    # Enumerate all files under operational_root for manifest
+    files = []
+    for p in sorted(operational_root.rglob("*")):
+        if p.is_file() and p.name != "fixture_manifest.json":
+            rel_path = p.relative_to(operational_root).as_posix()
+            c_bytes = p.read_bytes()
+            files.append(
+                {
+                    "path": rel_path,
+                    "byte_size": len(c_bytes),
+                    "sha256": hashlib.sha256(c_bytes).hexdigest(),
+                }
+            )
 
     record_counts = {
         "organization": len(mutated["organization"]),
@@ -872,30 +977,37 @@ def _build_m5_fixture_internal(
         files=files,
     )
     manifest_bytes = _serialize_object(manifest.model_dump(mode="json"))
-
-    operational_root.mkdir(parents=True, exist_ok=False)
-    for name, content in payloads.items():
-        (operational_root / name).write_bytes(content)
     manifest_path = operational_root / "fixture_manifest.json"
     manifest_path.write_bytes(manifest_bytes)
 
-    # 5. Run all 14 Validation Gates
-    val_context = ValidationContext(
-        config=config,
-        records=mutated,
-        ledger=ledger,
-        ground_truth=list(gt_records),
-        receipts=all_receipts,
-        operational_root=operational_root,
-        output_root=root,
-        manifest=manifest,
-    )
-    val_runner = ValidationRunner()
-    val_report = val_runner.run_all(val_context)
-    val_runner.write_reports(val_report, private_root)
-    val_runner.assert_all_passed(val_report)
-
     tree_sha256 = _tree_hash(operational_root)
+
+    # 5. Run all 14 Validation Gates if requested
+    if run_validation:
+        val_context = ValidationContext(
+            config=config,
+            records=mutated,
+            ledger=ledger,
+            ground_truth=list(gt_records),
+            receipts=all_receipts,
+            operational_root=operational_root,
+            output_root=root,
+            private_root=private_root,
+            manifest=manifest,
+            source_exports_root=source_exports_root,
+            oracle_root=oracle_root,
+            extra={
+                "master_seed": master_seed,
+                "config_path": str(config_path),
+                "tree_sha256": tree_sha256,
+                "record_counts": record_counts,
+            },
+        )
+        val_runner = ValidationRunner()
+        val_report = val_runner.run_all(val_context)
+        val_runner.write_reports(val_report, private_root)
+        val_runner.assert_all_passed(val_report)
+
     return FixtureBuildResult(
         output_root=root,
         operational_root=operational_root,

@@ -92,6 +92,7 @@ class ValidationContext:
     receipts: list[Any] = field(default_factory=list)
     operational_root: Path | None = None
     output_root: Path | None = None
+    private_root: Path | None = None
     manifest: Any = None
     source_exports_root: Path | None = None
     oracle_root: Path | None = None

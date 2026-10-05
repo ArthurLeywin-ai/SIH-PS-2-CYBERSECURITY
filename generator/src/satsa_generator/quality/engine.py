@@ -12,6 +12,7 @@ From GENERATOR_IMPLEMENTATION_PLAN §13:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from satsa_generator.core.errors import GeneratorError
@@ -372,6 +373,7 @@ class QualityMutationEngine:
         self,
         records: dict[str, list[Any]],
         plans: list[QualityPlan] | None = None,
+        source_exports_root: Path | None = None,
     ) -> QualityExecutionResult:
         """Execute quality mutations with strict 4-stage ordering and unexpected defect checking."""
         if plans is None:
@@ -397,7 +399,13 @@ class QualityMutationEngine:
 
         for plan in sorted_plans:
             mutator_fn = get_quality_mutator(plan.mutation_type)
-            current_records, receipt = mutator_fn(plan, current_records, self._seeds, self._ledger)
+            current_records, receipt = mutator_fn(
+                plan,
+                current_records,
+                self._seeds,
+                self._ledger,
+                source_exports_root=source_exports_root,
+            )
             receipts.append(receipt)
 
         # Reconcile unexpected defects (§13.4):
